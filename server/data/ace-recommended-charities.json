@@ -1,0 +1,47 @@
+{
+  "updatedAt": "2025-05-26",
+  "sourceUrl": "https://animalcharityevaluators.org/recommended-charities/",
+  "recommended": [
+    {
+      "name": "Animal Welfare Observatory",
+      "aliases": ["AWO"]
+    },
+    {
+      "name": "Aquatic Life Institute",
+      "aliases": ["ALI"]
+    },
+    {
+      "name": "Çiftlik Hayvanlarını Koruma Derneği",
+      "aliases": ["CHKD", "Turkish Farm Animal Protection Association"]
+    },
+    {
+      "name": "Dansk Vegetarisk Forening",
+      "aliases": ["Danish Vegetarian Association"]
+    },
+    {
+      "name": "Good Food Fund",
+      "aliases": []
+    },
+    {
+      "name": "Shrimp Welfare Project",
+      "aliases": []
+    },
+    {
+      "name": "Sinergia Animal",
+      "aliases": []
+    },
+    {
+      "name": "Sociedade Vegetariana Brasileira",
+      "aliases": ["Brazilian Vegetarian Society"]
+    },
+    {
+      "name": "The Humane League",
+      "aliases": ["Humane League"]
+    },
+    {
+      "name": "Wild Animal Initiative",
+      "aliases": ["WAI"]
+    }
+  ],
+  "standout": []
+}

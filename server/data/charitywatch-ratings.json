@@ -1,0 +1,79 @@
+{
+  "updatedAt": "2026-05-29",
+  "sourceUrl": "https://www.charitywatch.org/",
+  "notes": "CharityWatch blocks automated scraping. Entries are added manually from public CharityWatch charity pages or published CharityWatch articles.",
+  "entries": [
+    {
+      "ein": "237147797",
+      "organizationName": "Best Friends Animal Society",
+      "grade": "B+",
+      "programPercent": 74,
+      "sourceUrl": "https://www.charitywatch.org/charities/best-friends-animal-society",
+      "notes": "CharityWatch rating issued February 2026. FY2024 program percentage 74%."
+    },
+    {
+      "ein": "133039601",
+      "organizationName": "Alzheimer's Association",
+      "grade": "B+",
+      "programPercent": 75,
+      "sourceUrl": "https://www.charitywatch.org/charities/alzheimers-association-national-office",
+      "notes": "CharityWatch rating issued May 2026. FY2025 program percentage 75%."
+    },
+    {
+      "ein": "680124097",
+      "organizationName": "Red Rover",
+      "grade": "A-",
+      "programPercent": 77,
+      "sourceUrl": "https://www.charitywatch.org/charities/redrover",
+      "notes": "CharityWatch rating issued October 2024. FY2023 program percentage 77%."
+    },
+    {
+      "ein": "263364885",
+      "organizationName": "Mutts with a Mission",
+      "grade": "F",
+      "programPercent": 21,
+      "sourceUrl": "https://www.charitywatch.org/charities/mutts-with-a-mission",
+      "notes": "CharityWatch rating issued February 2026. FY2024 program percentage 21%."
+    },
+    {
+      "ein": "811770909",
+      "organizationName": "Project K-9 Hero",
+      "grade": "D",
+      "programPercent": 47,
+      "sourceUrl": "https://blog.charitywatch.org/animal-charities-ratings-versus-reality/",
+      "notes": "CharityWatch blog analysis (October 2025): 47% program, $50 cost to raise $100, D rating."
+    },
+    {
+      "ein": "460856543",
+      "organizationName": "White Coat Waste Project",
+      "grade": "B",
+      "programPercent": 66,
+      "sourceUrl": "https://www.charitywatch.org/charities/white-coat-waste-project",
+      "notes": "Program percentage from prior CharityWatch manual review; public page requires membership for full grade display."
+    },
+    {
+      "ein": "473415146",
+      "organizationName": "Pilots to the Rescue",
+      "grade": "D",
+      "programPercent": 47,
+      "sourceUrl": "https://blog.charitywatch.org/animal-charities-ratings-versus-reality/",
+      "notes": "CharityWatch blog analysis (October 2025): 47% program, $30 cost to raise $100, D rating."
+    },
+    {
+      "ein": "475643489",
+      "organizationName": "Paws of Honor",
+      "grade": "F",
+      "programPercent": 16,
+      "sourceUrl": "https://blog.charitywatch.org/animal-charities-ratings-versus-reality/",
+      "notes": "CharityWatch blog analysis (October 2025): 16% program, $74 cost to raise $100, F rating."
+    },
+    {
+      "ein": "521394893",
+      "organizationName": "Physicians Committee for Responsible Medicine",
+      "grade": "B+",
+      "programPercent": 77,
+      "sourceUrl": "https://www.charitywatch.org/charities/physicians-committee-for-responsible-medicine",
+      "notes": "CharityWatch Top-Rated. Rating issued May 2026. FY2025 program percentage 77%, $21 cost to raise $100."
+    }
+  ]
+}
