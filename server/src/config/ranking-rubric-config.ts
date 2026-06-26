@@ -1,17 +1,13 @@
+/** Every rubric category is scored 0–100. Weights in ranking-config.ts combine them into the total. */
 export const RUBRIC_CATEGORY_MAX_POINTS = {
-  governance: 10,
-  accountability: 25,
-  impactEvidence: 30,
-  financialEfficiency: 30,
-  politicalRisk: 5,
+  governance: 100,
+  accountability: 100,
+  impactEvidence: 100,
+  financialEfficiency: 100,
+  politicalRisk: 100,
 } as const
 
-export const RUBRIC_TOTAL_MAX_POINTS =
-  RUBRIC_CATEGORY_MAX_POINTS.governance +
-  RUBRIC_CATEGORY_MAX_POINTS.accountability +
-  RUBRIC_CATEGORY_MAX_POINTS.impactEvidence +
-  RUBRIC_CATEGORY_MAX_POINTS.financialEfficiency +
-  RUBRIC_CATEGORY_MAX_POINTS.politicalRisk
+export const RUBRIC_TOTAL_MAX_POINTS = 100
 
 export const ANIMAL_IMPACT_KEYWORDS = [
   "rescued",
@@ -32,6 +28,17 @@ export const ANIMAL_IMPACT_KEYWORDS = [
   "measurable",
   "year-over-year",
   "lives saved",
+  "shelter",
+  "humane",
+  "spay",
+  "neuter",
+  "animal protection",
+  "animal welfare",
+  "no-kill",
+  "rehabilitat",
+  "veteran",
+  "service dog",
+  "k9",
 ] as const
 
 export const IDENTITY_CONFUSION_KEYWORDS = [

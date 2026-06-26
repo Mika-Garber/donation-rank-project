@@ -64,7 +64,7 @@ export function LegacyPlanPage() {
             )}
             {group.organizations.map((organization) => (
               <Typography key={organization.id}>
-                • {organization.organizationName} ({organization.legacyTier}, verified {organization.verifiedDonationWorthinessScore}, confidence{" "}
+                • {organization.organizationName} ({organization.legacyTier}, stewardship {organization.verifiedStewardshipScore}, confidence{" "}
                 {organization.confidenceScore}%)
               </Typography>
             ))}

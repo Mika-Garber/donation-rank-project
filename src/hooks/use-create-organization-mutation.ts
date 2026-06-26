@@ -9,6 +9,10 @@ export function useCreateOrganizationMutation() {
     mutationFn: createOrganization,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organizationsQueryKey }).catch(() => undefined)
+      queryClient.invalidateQueries({ queryKey: ["research-audit"] }).catch(() => undefined)
+      queryClient.invalidateQueries({ queryKey: ["triage"] }).catch(() => undefined)
+      queryClient.invalidateQueries({ queryKey: ["portfolio-review"] }).catch(() => undefined)
+      queryClient.invalidateQueries({ queryKey: ["giving-plan"] }).catch(() => undefined)
     },
   })
 }

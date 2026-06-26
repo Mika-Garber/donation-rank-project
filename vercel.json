@@ -1,0 +1,23 @@
+{
+  "experimentalServices": {
+    "frontend": {
+      "entrypoint": ".",
+      "framework": "vite",
+      "routePrefix": "/",
+      "buildCommand": "npm run build"
+    },
+    "donation-rank-api": {
+      "type": "web",
+      "root": "server",
+      "entrypoint": "dist/index.js",
+      "routePrefix": "/api",
+      "buildCommand": "npm install && npm run build"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/((?!api).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

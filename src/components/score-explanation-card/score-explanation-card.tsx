@@ -14,9 +14,22 @@ function getProgressColor(level: ScoreCategoryExplanation["level"]): "success" |
   return "inherit"
 }
 
+function getCategoryTypeLabel(category: ScoreCategoryExplanation): string | null {
+  if (category.categoryType === "gate") return "Verification gate"
+  if (category.categoryType === "badge") return "Not part of stewardship score"
+  if (category.categoryType === "flag") return "Review flag"
+  if (category.categoryType === "stewardship" || (category.weightPercent ?? 0) > 0) {
+    return `Weight: ${category.weightPercent}% of stewardship`
+  }
+  return null
+}
+
 export function ScoreExplanationCard({ category }: ScoreExplanationCardProps) {
+  const categoryType = category.categoryType ?? (category.weightPercent > 0 ? "stewardship" : "badge")
   const maxPoints = resolveCategoryMaxPoints(category)
-  const progressValue = category.score === null ? 0 : (category.score / maxPoints) * 100
+  const showProgress = categoryType === "stewardship" && category.score !== null
+  const progressValue = showProgress ? (category.score! / maxPoints) * 100 : 0
+  const typeLabel = getCategoryTypeLabel({ ...category, categoryType })
 
   return (
     <ScoreExplanationCardRoot>
@@ -24,7 +37,7 @@ export function ScoreExplanationCard({ category }: ScoreExplanationCardProps) {
         <Typography variant="h6">{category.title}</Typography>
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
           <Chip size="small" label={category.level} color={getScoreLevelColor(category.level)} />
-          <Chip size="small" variant="outlined" label={`Weight: ${category.weightPercent}%`} />
+          {typeLabel ? <Chip size="small" variant="outlined" label={typeLabel} /> : null}
         </Box>
       </Box>
 
@@ -32,20 +45,34 @@ export function ScoreExplanationCard({ category }: ScoreExplanationCardProps) {
         {category.whatItMeasures}
       </Typography>
 
-      <Box sx={{ mt: 2 }}>
-        <Box sx={{ alignItems: "center", display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-          <Typography variant="body2">Score</Typography>
-          <Typography variant="body2">{formatCategoryScoreDisplay(category)}</Typography>
+      {categoryType === "stewardship" && (
+        <Box sx={{ mt: 2 }}>
+          <Box sx={{ alignItems: "center", display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+            <Typography variant="body2">Component score</Typography>
+            <Typography variant="body2">{formatCategoryScoreDisplay(category)}</Typography>
+          </Box>
+          {showProgress ? (
+            <LinearProgress
+              variant="determinate"
+              value={progressValue}
+              color={getProgressColor(category.level)}
+              sx={{ height: 8, borderRadius: 999 }}
+            />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Excluded from stewardship total — see financial completeness note.
+            </Typography>
+          )}
         </Box>
-        <LinearProgress
-          variant={category.score === null ? "indeterminate" : "determinate"}
-          value={progressValue}
-          color={getProgressColor(category.level)}
-          sx={{ height: 8, borderRadius: 999 }}
-        />
-      </Box>
+      )}
 
-      <Typography sx={{ mt: 2, fontWeight: 600 }}>Why this score</Typography>
+      {categoryType === "badge" && category.score !== null && (
+        <Typography variant="body2" sx={{ mt: 2 }}>
+          Reference subscore: {formatCategoryScoreDisplay(category)} (informational only)
+        </Typography>
+      )}
+
+      <Typography sx={{ mt: 2, fontWeight: 600 }}>Why this rating</Typography>
       <Typography sx={{ mt: 0.5 }}>{category.whyThisScore}</Typography>
 
       {category.details.length > 0 && (

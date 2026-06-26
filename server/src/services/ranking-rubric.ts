@@ -4,9 +4,15 @@ import {
   REVOKED_STATUS_KEYWORDS,
   RUBRIC_CATEGORY_MAX_POINTS,
 } from "../config/ranking-rubric-config.js"
-import { CHARITYWATCH_GRADE_SCORES } from "../config/watchdog-config.js"
-import type { MissionBucket, Organization, SourceMeta } from "../types/organization.js"
+import { MISSION_FIT_DEFAULT_SCORE, STEWARDSHIP_WEIGHTS } from "../config/ranking-config.js"
+import type { LegalVerificationStatus, MissionBucket, Organization, SourceMeta } from "../types/organization.js"
 import { getMissionBucket } from "./ranking-list-service.js"
+import {
+  countQuantifiedOutcomesFromText,
+  detectImpactDataYear,
+  detectImpactSourceTier,
+  impactSourceTierPoints,
+} from "./impact-metadata-service.js"
 
 export interface RubricCategoryResult {
   points: number
@@ -24,10 +30,23 @@ export interface FinancialRubricResult extends RubricCategoryResult {
   status: "known" | "unknown"
   warning: string | null
   staleData: boolean
+  completeness: "complete" | "partial" | "missing"
 }
 
-function clampPoints(value: number, maxPoints: number): number {
-  return Math.max(0, Math.min(value, maxPoints))
+export interface AccountabilityRubricResult extends RubricCategoryResult {
+  watchdogReviewRequired: boolean
+}
+
+export interface StewardshipTotalResult {
+  stewardshipScore: number
+  financialIncluded: boolean
+  financialCompleteness: "complete" | "partial" | "missing"
+}
+
+const CATEGORY_MAX = 100
+
+function clampScore(value: number): number {
+  return Math.max(0, Math.min(Math.round(value * 10) / 10, CATEGORY_MAX))
 }
 
 function toSafeString(value: unknown): string {
@@ -59,12 +78,13 @@ function countKeywordMatches(text: string, keywords: readonly string[]): number 
   return keywords.filter((keyword) => text.includes(keyword)).length
 }
 
-function hasMeasurableNumbers(text: string): boolean {
-  if (/\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:million|billion|thousand))?/i.test(text)) return true
-  if (/\b\d[\d,]*(?:\.\d+)?\s*(?:%|percent)/i.test(text)) return true
-  return /\b\d[\d,]*(?:\.\d+)?\s+(?:animals|dogs|cats|horses|acres|people|clients|patients|participants|adoptions|rescues|investigations|convictions|operations|states|countries|grants|projects|investigators|surgeries|transports|placements|volunteers|members|donors|meals|pounds|miles|hours|visits|calls|cases|laws|bills|veterans|teams|pairs|guides|puppies|kittens|birds|wildlife|sanctuaries|farms|ranches|facilities|centers|programs|services|events|trainings|workshops|sessions|classes|students|schools|communities|households|families|individuals|beneficiaries|recipients|supporters|partners|agencies|officers|employees|staff|lives|deaths|euthanasia|intakes|outcomes|inspections|seizures|arrests|prosecutions|filings|lawsuits|victories|wins|acres|hectares|species|populations|litters|herds|flocks|packs|colonies|liters|gallons|tons|units|beds|kennels|crates|vehicles|flights|trips|deliveries|distributions|donations|gifts|scholarships|awards|publications|reports|studies|trials|patents|discoveries|breakthroughs|therapies|treatments|procedures|screenings|tests|vaccinations|microchips|spays|neuters|sterilizations|vaccines|medications|prescriptions|referrals|consultations|counseling|sessions|graduates|graduations|deployments|matches|placements|graduates|graduations|handlers|trainers|graduates|teams|pairs|guides|puppies|kittens)\b/i.test(
-    text,
-  )
+function scoreImpactRecency(dataYear: number | null): number {
+  if (dataYear === null) return 3
+  const age = new Date().getFullYear() - dataYear
+  if (age <= 1) return 10
+  if (age <= 2) return 7
+  if (age <= 4) return 4
+  return 1
 }
 
 function isLikelyValidEin(ein: string): boolean {
@@ -72,8 +92,187 @@ function isLikelyValidEin(ein: string): boolean {
   return digits.length === 9
 }
 
+function scoreProgramPercent(value: number): number {
+  if (value >= 90) return 40
+  if (value >= 85) return 36
+  if (value >= 80) return 32
+  if (value >= 75) return 28
+  if (value >= 70) return 22
+  if (value >= 65) return 16
+  if (value >= 55) return 10
+  return 4
+}
+
+function scoreFundraisingPercent(value: number): number {
+  if (value <= 8) return 30
+  if (value <= 12) return 26
+  if (value <= 15) return 22
+  if (value <= 20) return 16
+  if (value <= 25) return 10
+  if (value <= 35) return 6
+  return 2
+}
+
+function scoreAdminPercent(value: number): number {
+  if (value <= 8) return 20
+  if (value <= 10) return 17
+  if (value <= 12) return 14
+  if (value <= 15) return 10
+  if (value <= 18) return 7
+  if (value <= 25) return 4
+  return 2
+}
+
+function normalizeCharityWatchGrade(grade: string): string {
+  return grade.trim().toUpperCase()
+}
+
+function getCharityWatchAccountabilityAdjustment(grade: string): { points: number; reviewRequired: boolean; detail: string } {
+  const normalized = normalizeCharityWatchGrade(grade)
+  if (normalized === "A+" || normalized === "A") {
+    return { points: 10, reviewRequired: false, detail: `CharityWatch grade ${grade} supports accountability confidence.` }
+  }
+  if (normalized === "B+" || normalized === "B") {
+    return { points: 7, reviewRequired: false, detail: `CharityWatch grade ${grade} supports accountability confidence.` }
+  }
+  if (normalized === "C+" || normalized === "C") {
+    return { points: 0, reviewRequired: true, detail: `CharityWatch grade ${grade} is neutral and warrants review.` }
+  }
+  if (normalized === "D" || normalized === "F") {
+    return {
+      points: -15,
+      reviewRequired: true,
+      detail: `CharityWatch grade ${grade} is poor and triggers watchdog review.`,
+    }
+  }
+  return { points: 0, reviewRequired: false, detail: `CharityWatch grade ${grade} is on file.` }
+}
+
+function getCharityNavigatorAccountabilityAdjustment(rating: number): { points: number; reviewRequired: boolean; detail: string } {
+  if (rating >= 4) {
+    return { points: 14, reviewRequired: false, detail: `Charity Navigator rating: ${rating} stars.` }
+  }
+  if (rating >= 3) {
+    return { points: 10, reviewRequired: false, detail: `Charity Navigator rating: ${rating} stars.` }
+  }
+  if (rating === 2) {
+    return {
+      points: -8,
+      reviewRequired: true,
+      detail: `Charity Navigator rating: ${rating} stars — below average and warrants review.`,
+    }
+  }
+  return {
+    points: -14,
+    reviewRequired: true,
+    detail: `Charity Navigator rating: ${rating} stars — poor watchdog signal.`,
+  }
+}
+
+export function deriveLegalVerificationStatus(
+  organization: Organization,
+  legalIdentity: LegalIdentityResult,
+  hasAnyResearch: boolean,
+  missingCoreFields: string[],
+): LegalVerificationStatus {
+  if (legalIdentity.revokedOrUnverified) return "Failed Verification"
+
+  const hasEin = Boolean(toSafeString(organization.ein).trim())
+  const verified501 = toSafeString(organization.is501c3Verified).trim().toLowerCase() === "y"
+
+  if (!hasAnyResearch && missingCoreFields.length >= 3 && !hasEin) {
+    return "Insufficient Data"
+  }
+
+  if (legalIdentity.unclearIdentity || missingCoreFields.length > 0 || !verified501 || !hasEin) {
+    return "Needs Review"
+  }
+
+  if (legalIdentity.identityConfusion) {
+    return "Needs Review"
+  }
+
+  return "Verified"
+}
+
+export function scoreStewardshipGovernance(organization: Organization, legalIdentity: LegalIdentityResult): RubricCategoryResult {
+  const details: string[] = []
+  const sourceMeta = organization.sourceMeta ?? {}
+  const hasWebsite = Boolean(toSafeString(organization.website).trim())
+  const hasIrsSource = hasSourceType(sourceMeta, "irs", "propublica", "form 990")
+  let points = 40
+
+  if (hasIrsSource) {
+    points += 22
+    details.push("IRS or ProPublica filing source supports governance hygiene.")
+  }
+  if (hasWebsite) {
+    points += 12
+    details.push("Public website helps confirm the organization is active.")
+  }
+  if (!legalIdentity.identityConfusion) {
+    points += 16
+    details.push("No alias or identity confusion was noted.")
+  } else {
+    points -= 18
+    details.push("Possible alias or identity confusion lowers governance hygiene.")
+  }
+  if (organization.researchStatus === "complete") {
+    points += 10
+  } else if (organization.researchStatus === "partial") {
+    points += 4
+  }
+  if (organization.researchStatus === "failed") {
+    points -= 12
+    details.push("Automated research failed to fully confirm governance details.")
+  }
+  if (hasRecentSource(sourceMeta)) {
+    points += 6
+    details.push("At least one research source was refreshed recently.")
+  }
+
+  return {
+    points: clampScore(points),
+    maxPoints: RUBRIC_CATEGORY_MAX_POINTS.governance,
+    details,
+  }
+}
+
+export function scoreMissionFit(organization: Organization): RubricCategoryResult {
+  const details: string[] = []
+  let points: number = MISSION_FIT_DEFAULT_SCORE
+  const role = organization.duplicateMissionRole
+
+  if (role === "primary") {
+    points = 90
+    details.push("Marked as a primary organization within its mission overlap group.")
+  } else if (role === "secondary") {
+    points = 75
+    details.push("Marked as a secondary organization within its mission overlap group.")
+  } else if (role === "phasing-out") {
+    points = 50
+    details.push("Marked as phasing out within its mission overlap group.")
+  } else {
+    details.push("No explicit mission-fit role assigned — using neutral default.")
+  }
+
+  if (organization.subcategory && organization.subcategory.trim() && organization.subcategory !== "General") {
+    points = Math.min(100, points + 5)
+    details.push(`Subcategory "${organization.subcategory}" provides clearer mission-bucket fit.`)
+  }
+
+  if (organization.duplicateMission.trim()) {
+    details.push("Duplicate-mission flag is recorded for portfolio review.")
+  }
+
+  return {
+    points: clampScore(points),
+    maxPoints: 100,
+    details,
+  }
+}
+
 export function scoreLegalIdentity(organization: Organization): LegalIdentityResult {
-  const maxPoints = RUBRIC_CATEGORY_MAX_POINTS.governance
   const details: string[] = []
   const ein = toSafeString(organization.ein).trim()
   const verified = toSafeString(organization.is501c3Verified).trim().toLowerCase()
@@ -91,42 +290,44 @@ export function scoreLegalIdentity(organization: Organization): LegalIdentityRes
 
   if (hasEin) details.push(`EIN on file: ${ein}.`)
   else details.push("No reliable EIN on file.")
-
   if (has501c3) details.push("501(c)(3) status is verified.")
   else if (explicitlyNot501c3 || revokedStatus) details.push("501(c)(3) status is not verified or appears revoked.")
   else details.push("501(c)(3) status still needs confirmation.")
 
-  if (hasWebsite) details.push("Public website helps confirm the organization is active.")
-  if (hasIrsSource) details.push("IRS or ProPublica filing source supports legal identity.")
-  if (identityConfusion) details.push("Notes mention possible alias or identity confusion.")
-
-  let points = 4
+  let points = 0
 
   if (revokedStatus || (!validEin && !hasEin)) {
     points = 0
-  } else if (validEin && has501c3 && hasWebsite && !identityConfusion && hasIrsSource) {
-    points = 10
-  } else if (validEin && has501c3 && !identityConfusion) {
-    points = 10
-  } else if (validEin && (has501c3 || hasWebsite || hasIrsSource) && !identityConfusion) {
-    points = 7
-  } else if (hasEin || hasWebsite || hasIrsSource) {
-    points = 4
   } else {
-    points = 0
+    if (validEin) points += 22
+    else if (hasEin) points += 10
+
+    if (has501c3) points += 25
+    else if (!explicitlyNot501c3) points += 8
+
+    if (hasIrsSource) points += 20
+    if (hasWebsite) points += 12
+    if (!identityConfusion) points += 12
+    else points -= 15
+
+    if (organization.researchStatus === "complete") points += 9
+    else if (organization.researchStatus === "partial") points += 4
+    if (organization.researchStatus === "failed") {
+      points -= 12
+      details.push("Automated research failed to fully confirm identity.")
+    }
   }
 
-  if (organization.researchStatus === "failed") {
-    points = Math.max(0, points - 2)
-    details.push("Automated research failed to fully confirm identity.")
-  }
+  if (identityConfusion) details.push("Notes mention possible alias or identity confusion.")
+  if (hasWebsite) details.push("Public website helps confirm the organization is active.")
+  if (hasIrsSource) details.push("IRS or ProPublica filing source supports legal identity.")
 
   const unclearIdentity = !validEin || identityConfusion || (!has501c3 && !hasIrsSource && !hasWebsite)
   const revokedOrUnverified = revokedStatus || explicitlyNot501c3
 
   return {
-    points: clampPoints(points, maxPoints),
-    maxPoints,
+    points: clampScore(points),
+    maxPoints: RUBRIC_CATEGORY_MAX_POINTS.governance,
     details,
     unclearIdentity,
     revokedOrUnverified,
@@ -134,96 +335,108 @@ export function scoreLegalIdentity(organization: Organization): LegalIdentityRes
   }
 }
 
-export function scoreAccountability(organization: Organization): RubricCategoryResult {
-  const maxPoints = RUBRIC_CATEGORY_MAX_POINTS.accountability
+export function scoreAccountability(organization: Organization): AccountabilityRubricResult {
   const details: string[] = []
   let points = 0
+  let watchdogReviewRequired = false
   const sourceMeta = organization.sourceMeta ?? {}
   const accountabilityNotes = toSafeString(organization.accountabilityNotes).trim()
   const notes = normalizedNotes(organization)
   const hasWebsite = Boolean(toSafeString(organization.website).trim())
 
   if (hasWebsite) {
-    points += 2
+    points += 8
     details.push("Official website is on file.")
   }
 
   if (accountabilityNotes) {
-    points += 4
+    points += 10
     details.push("Accountability notes document public reporting.")
   }
 
   if (hasSourceType(sourceMeta, "propublica", "form 990", "990")) {
-    points += 5
+    points += 16
     details.push("Form 990 or ProPublica filing source is on file.")
   }
 
   if (hasRecentSource(sourceMeta)) {
-    points += 3
+    points += 8
     details.push("At least one research source was refreshed recently.")
   }
 
-  if (notes.includes("annual report") || notes.includes("impact report")) {
-    points += 4
+  if (notes.includes("annual report pdf")) {
+    points += 10
+    details.push("Uploaded annual or impact report PDF is on file.")
+  } else if (notes.includes("annual report") || notes.includes("impact report")) {
+    points += 6
     details.push("Annual or impact report reference found.")
   }
 
   if (notes.includes("board") || notes.includes("leadership") || notes.includes("director")) {
-    points += 2
+    points += 6
     details.push("Leadership or board information appears in research notes.")
   }
 
   if (notes.includes("program") || notes.includes("how donations") || notes.includes("donations are used")) {
-    points += 2
+    points += 6
     details.push("Program or donation-use description is documented.")
   }
 
   if (organization.charityNavigatorRating !== null) {
-    points += 4
-    details.push(`Charity Navigator rating: ${organization.charityNavigatorRating} stars.`)
+    const cnAdjustment = getCharityNavigatorAccountabilityAdjustment(organization.charityNavigatorRating)
+    points += cnAdjustment.points
+    watchdogReviewRequired = watchdogReviewRequired || cnAdjustment.reviewRequired
+    details.push(cnAdjustment.detail)
   }
 
   if (organization.charityWatchGrade) {
-    const gradeScore = CHARITYWATCH_GRADE_SCORES[organization.charityWatchGrade.toUpperCase()]
-    points += gradeScore && gradeScore >= 84 ? 3 : 2
-    details.push(`CharityWatch grade on file: ${organization.charityWatchGrade}.`)
+    const cwAdjustment = getCharityWatchAccountabilityAdjustment(organization.charityWatchGrade)
+    points += cwAdjustment.points
+    watchdogReviewRequired = watchdogReviewRequired || cwAdjustment.reviewRequired
+    details.push(cwAdjustment.detail)
   }
 
   if (organization.aceRecommendation) {
-    points += 2
+    points += 8
     details.push(`Animal Charity Evaluators status: ${organization.aceRecommendation}.`)
   }
 
   if (hasSourceType(sourceMeta, "candid", "guidestar")) {
-    points += 2
+    points += 5
     details.push("Candid/GuideStar source is on file.")
   }
 
   if (hasSourceType(sourceMeta, "bbb", "wise giving")) {
-    points += 2
+    points += 5
     details.push("BBB Wise Giving Alliance source is on file.")
   }
 
-  if (Object.keys(sourceMeta).length >= 3) {
-    points += 2
+  const sourceCount = Object.keys(sourceMeta).length
+  if (sourceCount >= 5) {
+    points += 8
+    details.push("Many independent sources support transparency.")
+  } else if (sourceCount >= 3) {
+    points += 4
     details.push("Multiple independent sources support transparency.")
   }
 
-  if (points <= 3) {
+  if (points < 30) {
     details.push("Transparency evidence is still very limited.")
-  } else if (points < 14) {
+  } else if (points < 60) {
     details.push("Some accountability information exists, but important details are still missing.")
+  } else if (points >= 85) {
+    details.push("Strong accountability and transparency documentation.")
   }
 
   return {
-    points: clampPoints(points, maxPoints),
-    maxPoints,
+    points: clampScore(points),
+    maxPoints: RUBRIC_CATEGORY_MAX_POINTS.accountability,
     details,
+    watchdogReviewRequired,
   }
 }
 
 export function scoreImpactEvidence(organization: Organization): RubricCategoryResult {
-  const maxPoints = RUBRIC_CATEGORY_MAX_POINTS.impactEvidence
   const details: string[] = []
   const impactNotes = toSafeString(organization.impactEvidenceNotes).trim()
   const notes = normalizedNotes(organization)
@@ -231,81 +444,101 @@ export function scoreImpactEvidence(organization: Organization): RubricCategoryR
 
   if (!impactNotes && !notes.includes("annual report") && !notes.includes("impact report")) {
     details.push("No documented impact evidence yet — mission alone does not earn a high impact score.")
-    return { points: 0, maxPoints, details }
+    return { points: 0, maxPoints: RUBRIC_CATEGORY_MAX_POINTS.impactEvidence, details }
   }
 
   let points = 0
 
-  if (impactNotes) {
-    points += 6
-    details.push("Impact notes are on file.")
+  const outcomeCount = Math.max(
+    organization.quantifiedOutcomeCount ?? 0,
+    countQuantifiedOutcomesFromText(combinedImpactText),
+  )
+  if (outcomeCount >= 8) {
+    points += 25
+    details.push(`${outcomeCount} distinct quantified outcomes documented.`)
+  } else if (outcomeCount >= 5) {
+    points += 20
+    details.push(`${outcomeCount} quantified outcomes documented.`)
+  } else if (outcomeCount >= 3) {
+    points += 14
+    details.push(`${outcomeCount} quantified outcomes documented.`)
+  } else if (outcomeCount >= 1) {
+    points += 8
+    details.push("Limited quantified outcomes found.")
   }
 
   const keywordMatches = countKeywordMatches(combinedImpactText, ANIMAL_IMPACT_KEYWORDS)
-  if (keywordMatches >= 4) {
-    points += 10
+  if (keywordMatches >= 5) {
+    points += 18
     details.push("Multiple specific animal-outcome themes are documented.")
-  } else if (keywordMatches >= 2) {
-    points += 6
-    details.push("Some specific animal-outcome language is documented.")
+  } else if (keywordMatches >= 3) {
+    points += 12
+    details.push("Several specific animal-outcome themes are documented.")
   } else if (keywordMatches >= 1) {
-    points += 3
+    points += 6
     details.push("Limited specific outcome language was found.")
   }
 
-  if (hasMeasurableNumbers(combinedImpactText)) {
-    points += 8
-    details.push("Measurable numbers or quantified outcomes appear in the evidence.")
+  const sourceTierKey = detectImpactSourceTier(organization)
+  let sourceTier = impactSourceTierPoints(sourceTierKey)
+  const hasStrongForm990Evidence =
+    sourceTierKey === "form_990" &&
+    (outcomeCount >= 3 || combinedImpactText.includes("key quantified outcomes"))
+  if (hasStrongForm990Evidence) {
+    sourceTier = Math.max(sourceTier, 12)
   }
+  points += sourceTier
+  if (sourceTier >= 20) details.push("High-quality impact source (annual report or evaluator).")
+  else if (sourceTier >= 12 && hasStrongForm990Evidence) {
+    details.push("Strong Form 990 Part III outcomes documented with quantified results.")
+  } else if (sourceTier >= 12) details.push("Website impact research supports outcome claims.")
+  else if (sourceTier >= 10) details.push("Cause IQ profile adds structured program and funding context beyond raw 990 text.")
+  else if (sourceTier >= 8) details.push("Impact evidence is primarily from Form 990 filings.")
+  else details.push("Impact notes exist but source quality is limited.")
 
-  if (
-    notes.includes("annual report") ||
-    notes.includes("impact report") ||
-    impactNotes.toLowerCase().includes("report") ||
-    impactNotes.toLowerCase().includes("form 990") ||
-    impactNotes.toLowerCase().includes("part iii")
-  ) {
-    points += 4
-    details.push("Impact or annual report reference supports the outcome claims.")
-  }
+  const dataYear = organization.impactDataYear ?? detectImpactDataYear(combinedImpactText)
+  const recencyPoints = scoreImpactRecency(dataYear)
+  points += recencyPoints
+  if (recencyPoints >= 7) details.push("Impact data appears recent.")
+  else if (recencyPoints <= 3) details.push("Impact data may be outdated.")
 
   const vagueOnly =
     impactNotes.length > 0 &&
+    outcomeCount === 0 &&
     keywordMatches === 0 &&
-    !hasMeasurableNumbers(combinedImpactText) &&
     (combinedImpactText.includes("mission") || combinedImpactText.includes("help") || combinedImpactText.includes("support"))
 
   if (vagueOnly) {
-    points = Math.min(points, 11)
+    points = Math.min(points, 35)
     details.push("Impact language is mostly mission-focused rather than outcome-specific.")
   }
 
-  if (points >= 24) {
+  if (
+    sourceTierKey === "form_990" &&
+    impactNotes.length >= 150 &&
+    keywordMatches >= 1 &&
+    points < 26
+  ) {
+    points = 26
+    details.push("Form 990 program description documents meaningful animal welfare work.")
+  }
+
+  if (points >= 80) {
     details.push("Strong, evidence-backed impact documentation.")
-  } else if (points >= 12) {
-    details.push("Good impact direction, but evidence is not fully quantified.")
-  } else if (points >= 1) {
+  } else if (points >= 55) {
+    details.push("Good impact direction, but evidence is not as strong as top-ranked organizations.")
+  } else if (points >= 25) {
     details.push("Impact claims exist but remain weakly supported.")
   }
 
   return {
-    points: clampPoints(points, maxPoints),
-    maxPoints,
+    points: clampScore(points),
+    maxPoints: RUBRIC_CATEGORY_MAX_POINTS.impactEvidence,
     details,
   }
 }
 
-function scoreRatioPoints(value: number, bands: Array<{ min?: number; max?: number; points: number }>): number {
-  for (const band of bands) {
-    const meetsMin = band.min === undefined || value >= band.min
-    const meetsMax = band.max === undefined || value <= band.max
-    if (meetsMin && meetsMax) return band.points
-  }
-  return 0
-}
-
 export function scoreFinancialEfficiency(organization: Organization): FinancialRubricResult {
-  const maxPoints = RUBRIC_CATEGORY_MAX_POINTS.financialEfficiency
   const details: string[] = []
   const sourceMeta = organization.sourceMeta ?? {}
   const hasAllRatios =
@@ -316,11 +549,12 @@ export function scoreFinancialEfficiency(organization: Organization): FinancialR
   if (!hasAllRatios && organization.programPercent === null && organization.fundraisingPercent === null && organization.adminPercent === null) {
     return {
       points: 0,
-      maxPoints,
+      maxPoints: RUBRIC_CATEGORY_MAX_POINTS.financialEfficiency,
       details: ["Program, fundraising, and admin percentages are not verified yet."],
       status: "unknown",
       warning: "Financials missing — needs Form 990 or charity rating source.",
       staleData: false,
+      completeness: "missing",
     }
   }
 
@@ -329,79 +563,65 @@ export function scoreFinancialEfficiency(organization: Organization): FinancialR
 
   if (organization.programPercent !== null) {
     ratioCount += 1
-    points += scoreRatioPoints(organization.programPercent, [
-      { min: 85, points: 8 },
-      { min: 75, points: 6 },
-      { min: 65, points: 4 },
-      { min: 0, points: 2 },
-    ])
+    points += scoreProgramPercent(organization.programPercent)
     details.push(`Program spending: ${organization.programPercent}%.`)
   }
 
   if (organization.fundraisingPercent !== null) {
     ratioCount += 1
-    points += scoreRatioPoints(organization.fundraisingPercent, [
-      { max: 12, points: 8 },
-      { max: 20, points: 6 },
-      { max: 30, points: 4 },
-      { max: 100, points: 2 },
-    ])
+    points += scoreFundraisingPercent(organization.fundraisingPercent)
     details.push(`Fundraising cost: ${organization.fundraisingPercent}%.`)
   }
 
   if (organization.adminPercent !== null) {
     ratioCount += 1
-    points += scoreRatioPoints(organization.adminPercent, [
-      { max: 10, points: 8 },
-      { max: 15, points: 6 },
-      { max: 20, points: 4 },
-      { max: 100, points: 2 },
-    ])
+    points += scoreAdminPercent(organization.adminPercent)
     details.push(`Administration cost: ${organization.adminPercent}%.`)
   }
 
   if (ratioCount === 3) {
-    points += 4
+    points += 8
     details.push("Full program, fundraising, and admin ratios are available.")
   } else {
-    points = Math.min(points, 18)
+    points = Math.min(points, 55)
     details.push("Financial picture is incomplete because one or more ratios are missing.")
   }
 
   if (hasSourceType(sourceMeta, "propublica", "form 990", "990", "charity navigator")) {
-    points += 3
+    points += 4
     details.push("Financial ratios are supported by a filing or watchdog source.")
   }
 
   const staleData = Object.keys(sourceMeta).length > 0 && !hasRecentSource(sourceMeta, 36)
   if (staleData) {
-    points = Math.max(0, points - 4)
+    points = Math.max(0, points - 8)
     details.push("Financial source data may be stale — confidence is reduced.")
   }
 
   if (ratioCount < 3) {
     return {
-      points: clampPoints(points, maxPoints),
-      maxPoints,
+      points: clampScore(points),
+      maxPoints: RUBRIC_CATEGORY_MAX_POINTS.financialEfficiency,
       details,
       status: "unknown",
       warning: "Financial efficiency is limited because verified ratios are incomplete.",
       staleData,
+      completeness: "partial",
     }
   }
 
   return {
-    points: clampPoints(points, maxPoints),
-    maxPoints,
+    points: clampScore(points),
+    maxPoints: RUBRIC_CATEGORY_MAX_POINTS.financialEfficiency,
     details,
     status: "known",
     warning: staleData ? "Financial ratios exist but source data may be outdated." : null,
     staleData,
+    completeness: "complete",
   }
 }
 
 export function scorePoliticalRisk(organization: Organization, missionBucket?: MissionBucket): RubricCategoryResult {
-  const maxPoints = RUBRIC_CATEGORY_MAX_POINTS.politicalRisk
   const details: string[] = []
   const politicalNotes = toSafeString(organization.politicalInvolvementNotes).trim()
   const notes = `${politicalNotes} ${toSafeString(organization.notes)}`.toLowerCase()
@@ -411,70 +631,85 @@ export function scorePoliticalRisk(organization: Organization, missionBucket?: M
     organization.subcategory.toLowerCase().includes("legal") ||
     resolvedMissionBucket === "Animal Legal Advocacy"
 
-  let points = 4
+  let points = 55
 
   if (politicalNotes) {
-    points += 1
+    points += 18
     details.push("Political or advocacy involvement is documented.")
   } else {
-    points -= 1
+    points -= 12
     details.push("Political or advocacy notes are not recorded yet.")
   }
 
   if (notes.includes("nonpartisan") || notes.includes("low political") || notes.includes("minimal advocacy")) {
-    points += 1
+    points += 12
     details.push("Notes suggest limited or nonpartisan political involvement.")
   }
 
   if (notes.includes("lobby") || notes.includes("campaign") || notes.includes("ballot")) {
     if (isLegalAdvocacy) {
+      points += 8
       details.push("Advocacy or policy work is expected for this legal/advocacy mission type.")
     } else {
-      points -= 1
+      points -= 12
       details.push("Notes mention lobbying, campaign, or ballot activity — review donor comfort.")
     }
   }
 
   if (notes.includes("unclear") || notes.includes("unknown political")) {
-    points -= 2
+    points -= 18
     details.push("Political or advocacy role is unclear and needs donor review.")
   }
 
   if (notes.includes("high political") || notes.includes("major political")) {
-    points -= 2
+    points -= 20
     details.push("Notes suggest higher political involvement than typical direct-service charities.")
   }
 
   if (isLegalAdvocacy && politicalNotes && !notes.includes("unclear")) {
-    points = Math.max(points, 3)
+    points = Math.max(points, 62)
     details.push("Legal advocacy organizations are scored for transparency, not penalized for policy work alone.")
   }
 
   return {
-    points: clampPoints(points, maxPoints),
-    maxPoints,
+    points: clampScore(points),
+    maxPoints: RUBRIC_CATEGORY_MAX_POINTS.politicalRisk,
     details,
   }
 }
 
-export function calculateRubricTotal(
-  governance: LegalIdentityResult,
-  accountability: RubricCategoryResult,
-  impact: RubricCategoryResult,
+export function calculateStewardshipTotal(
   financial: FinancialRubricResult,
-  political: RubricCategoryResult,
-): { earnedPoints: number; maxPoints: number; preliminaryScore: number } {
-  const earnedPoints =
-    governance.points + accountability.points + impact.points + political.points + (financial.status === "known" ? financial.points : 0)
+  accountability: RubricCategoryResult,
+  governance: RubricCategoryResult,
+  missionFit: RubricCategoryResult,
+): StewardshipTotalResult {
+  const financialIncluded = financial.status === "known" && financial.completeness === "complete"
 
-  const maxPoints =
-    governance.maxPoints +
-    accountability.maxPoints +
-    impact.maxPoints +
-    political.maxPoints +
-    (financial.status === "known" ? financial.maxPoints : 0)
+  if (financialIncluded) {
+    const stewardshipScore =
+      (financial.points * STEWARDSHIP_WEIGHTS.financialEfficiency) / 100 +
+      (accountability.points * STEWARDSHIP_WEIGHTS.accountability) / 100 +
+      (governance.points * STEWARDSHIP_WEIGHTS.governance) / 100 +
+      (missionFit.points * STEWARDSHIP_WEIGHTS.missionFit) / 100
 
-  const preliminaryScore = maxPoints > 0 ? Math.round((earnedPoints / maxPoints) * 1000) / 10 : 0
+    return {
+      stewardshipScore: Math.round(stewardshipScore * 10) / 10,
+      financialIncluded: true,
+      financialCompleteness: "complete",
+    }
+  }
 
-  return { earnedPoints, maxPoints, preliminaryScore }
+  const remainingWeight =
+    STEWARDSHIP_WEIGHTS.accountability + STEWARDSHIP_WEIGHTS.governance + STEWARDSHIP_WEIGHTS.missionFit
+  const stewardshipScore =
+    (accountability.points * STEWARDSHIP_WEIGHTS.accountability) / remainingWeight +
+    (governance.points * STEWARDSHIP_WEIGHTS.governance) / remainingWeight +
+    (missionFit.points * STEWARDSHIP_WEIGHTS.missionFit) / remainingWeight
+
+  return {
+    stewardshipScore: Math.round(stewardshipScore * 10) / 10,
+    financialIncluded: false,
+    financialCompleteness: financial.completeness,
+  }
 }

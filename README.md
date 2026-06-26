@@ -1,6 +1,6 @@
-# Donation Ranking Web App
+# Stewardship Ranking Web App
 
-Client-friendly donation ranking app for non-technical users.  
+Client-friendly stewardship ranking app for non-technical users.  
 This app ranks organizations, explains each rank in plain English, and supports one-click online data refresh.
 
 ## What the app does
@@ -42,6 +42,12 @@ Set a shared token in both places:
 - `VITE_APP_ACCESS_TOKEN=your-token`
 - `APP_ACCESS_TOKEN=your-token`
 
+For local admin tools (Add Organization, Research Audit, Data Refresh, etc.), set:
+
+- `VITE_SHOW_ADMIN_TOOLS=true`
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Vercel client mode (`VITE_SHOW_ADMIN_TOOLS=false`) and environment variable setup.
+
 ### 3) Run the app
 
 In one command from root:
@@ -69,11 +75,15 @@ In one command from root:
 
 ## Private hosting recommendations
 
-For a non-technical client, host privately on Vercel/Render/Fly and keep access protected:
+Production client app: **https://donation-rank-project.vercel.app**
 
-- Set `APP_ACCESS_TOKEN` on server.
-- Set `VITE_APP_ACCESS_TOKEN` on frontend.
-- Keep project URL private and share only with client/family.
+For a non-technical client, keep access protected:
+
+- Set `APP_ACCESS_TOKEN` on the API service and matching `VITE_APP_ACCESS_TOKEN` on Vercel.
+- `VITE_SHOW_ADMIN_TOOLS=false` is already set on Vercel production.
+- Keep the URL private and share only with trusted family members.
+
+Full deployment details: [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ## Notes
 

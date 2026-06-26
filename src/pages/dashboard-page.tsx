@@ -1,5 +1,6 @@
 import {
   Alert,
+  Autocomplete,
   Box,
   CircularProgress,
   FormControl,
@@ -8,12 +9,14 @@ import {
   Paper,
   Select,
   Switch,
+  TextField,
   Typography,
 } from "@mui/material"
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useLocation } from "react-router-dom"
 import { OrganizationCard } from "../components/organization-card/organization-card"
 import { useOrganizationsQuery } from "../hooks/use-organizations-query"
-import { useTriageQuery } from "../hooks/use-triage-query"
+import { usePortfolioConcentrationQuery } from "../hooks/use-portfolio-concentration-query"
 import { ALL_ORGANIZATIONS_LIST_KEY, useUiStore } from "../store/use-ui-store"
 import type { Organization } from "../types/organization"
 
@@ -26,16 +29,30 @@ function getDisplayRank(organization: Organization, rankViewMode: "personalized"
 }
 
 export function DashboardPage() {
+  const location = useLocation()
   const { data, isLoading, isError } = useOrganizationsQuery()
-  const triageQuery = useTriageQuery(12)
+  const portfolioConcentrationQuery = usePortfolioConcentrationQuery()
   const rankingListFilter = useUiStore((state) => state.rankingListFilter)
   const setRankingListFilter = useUiStore((state) => state.setRankingListFilter)
   const showOnlyTopTen = useUiStore((state) => state.showOnlyTopTen)
   const setShowOnlyTopTen = useUiStore((state) => state.setShowOnlyTopTen)
+  const showOnlyFinalPortfolio = useUiStore((state) => state.showOnlyFinalPortfolio)
+  const setShowOnlyFinalPortfolio = useUiStore((state) => state.setShowOnlyFinalPortfolio)
   const rankViewMode = useUiStore((state) => state.rankViewMode)
   const setRankViewMode = useUiStore((state) => state.setRankViewMode)
+  const dashboardSortMode = useUiStore((state) => state.dashboardSortMode)
+  const setDashboardSortMode = useUiStore((state) => state.setDashboardSortMode)
+  const [searchSelection, setSearchSelection] = useState<Organization | null>(null)
+  const [pendingScrollOrganizationId, setPendingScrollOrganizationId] = useState<string | null>(null)
+  const [highlightedOrganizationId, setHighlightedOrganizationId] = useState<string | null>(null)
+  const focusedOrganizationIdRef = useRef<string | null>(null)
 
   const organizations = data ?? []
+  const finalPortfolioIds = useMemo(
+    () => new Set((portfolioConcentrationQuery.data?.suggestedFinalList ?? []).map((charity) => charity.id)),
+    [portfolioConcentrationQuery.data],
+  )
+  const finalPortfolioCount = finalPortfolioIds.size
   const rankingLists = useMemo(() => {
     const listMap = new Map<string, { key: string; label: string; organizationCount: number }>()
     for (const organization of organizations) {
@@ -63,11 +80,84 @@ export function DashboardPage() {
       ? "All organizations"
       : rankingLists.find((list) => list.key === rankingListFilter)?.label ?? "Selected list"
 
-  const filteredOrganizations = organizations
-    .filter((item) => rankingListFilter === ALL_ORGANIZATIONS_LIST_KEY || item.rankingListKey === rankingListFilter)
-    .sort((left, right) => getDisplayRank(left, rankViewMode, rankingListFilter) - getDisplayRank(right, rankViewMode, rankingListFilter))
+  const filteredOrganizations = useMemo(() => {
+    const filtered = organizations.filter((item) => {
+      if (rankingListFilter !== ALL_ORGANIZATIONS_LIST_KEY && item.rankingListKey !== rankingListFilter) {
+        return false
+      }
+      if (showOnlyFinalPortfolio && !finalPortfolioIds.has(item.id)) {
+        return false
+      }
+      return true
+    })
+
+    if (dashboardSortMode === "alphabetical") {
+      return [...filtered].sort((left, right) => left.organizationName.localeCompare(right.organizationName))
+    }
+
+    return [...filtered].sort(
+      (left, right) => getDisplayRank(left, rankViewMode, rankingListFilter) - getDisplayRank(right, rankViewMode, rankingListFilter),
+    )
+  }, [organizations, rankingListFilter, dashboardSortMode, rankViewMode, showOnlyFinalPortfolio, finalPortfolioIds])
 
   const visibleOrganizations = showOnlyTopTen ? filteredOrganizations.slice(0, 10) : filteredOrganizations
+
+  useEffect(() => {
+    if (!pendingScrollOrganizationId) return
+
+    const timeoutId = window.setTimeout(() => {
+      const element = document.getElementById(`organization-card-${pendingScrollOrganizationId}`)
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" })
+        setHighlightedOrganizationId(pendingScrollOrganizationId)
+        setPendingScrollOrganizationId(null)
+        window.setTimeout(() => setHighlightedOrganizationId(null), 2500)
+        return
+      }
+
+      setPendingScrollOrganizationId(null)
+    }, 100)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [pendingScrollOrganizationId, visibleOrganizations, rankingListFilter, showOnlyTopTen, dashboardSortMode])
+
+  function handleSearchSelect(organization: Organization | null): void {
+    setSearchSelection(organization)
+    if (!organization) return
+
+    if (rankingListFilter !== ALL_ORGANIZATIONS_LIST_KEY && organization.rankingListKey !== rankingListFilter) {
+      setRankingListFilter(organization.rankingListKey)
+    }
+
+    if (showOnlyFinalPortfolio && !finalPortfolioIds.has(organization.id)) {
+      setShowOnlyFinalPortfolio(false)
+    }
+
+    setShowOnlyTopTen(false)
+    setPendingScrollOrganizationId(organization.id)
+  }
+
+  useEffect(() => {
+    const focusOrganizationId = (location.state as { focusOrganizationId?: string } | null)?.focusOrganizationId
+    if (!focusOrganizationId || organizations.length === 0) return
+    if (focusedOrganizationIdRef.current === focusOrganizationId) return
+
+    const organization = organizations.find((item) => item.id === focusOrganizationId)
+    if (!organization) return
+
+    focusedOrganizationIdRef.current = focusOrganizationId
+    if (rankingListFilter !== ALL_ORGANIZATIONS_LIST_KEY && organization.rankingListKey !== rankingListFilter) {
+      setRankingListFilter(organization.rankingListKey)
+    }
+    if (showOnlyFinalPortfolio && !finalPortfolioIds.has(organization.id)) {
+      setShowOnlyFinalPortfolio(false)
+    }
+    setShowOnlyTopTen(false)
+    setSearchSelection(organization)
+    setPendingScrollOrganizationId(organization.id)
+    window.history.replaceState({}, document.title)
+  }, [location.state, organizations, rankingListFilter, setRankingListFilter, setShowOnlyFinalPortfolio, setShowOnlyTopTen, showOnlyFinalPortfolio, finalPortfolioIds])
+
   const completeCount = organizations.filter((item) => item.researchStatus === "complete").length
   const partialCount = organizations.filter((item) => item.researchStatus === "partial").length
   const failedCount = organizations.filter((item) => item.researchStatus === "failed").length
@@ -76,7 +166,8 @@ export function DashboardPage() {
     .filter((value): value is string => Boolean(value))
     .sort()
     .at(-1)
-  const preliminaryOnlyCount = organizations.filter((item) => item.rankingStatus === "Preliminary Only").length
+  const preliminaryCount = organizations.filter((item) => item.rankingStatus === "Preliminary").length
+  const notResearchedCount = organizations.filter((item) => item.rankingStatus === "Not Researched").length
 
   if (isLoading) {
     return (
@@ -95,30 +186,34 @@ export function DashboardPage() {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Paper sx={{ p: 2.5 }}>
         <Typography variant="h4" gutterBottom>
-          Donation Worthiness Dashboard
+          Dashboard
         </Typography>
         <Typography color="text.secondary">
-          Organizations are ranked within mission-bucket lists so similar charities are compared fairly. You can also view all organizations together.
+          Organizations are ranked within mission-bucket lists by stewardship score so similar charities are compared fairly. You can also view all organizations together.
         </Typography>
         <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Viewing: {selectedListLabel} • {rankViewMode === "personalized" ? "Personalized rank" : "Objective rank"}
+          Viewing: {selectedListLabel}
+          {showOnlyFinalPortfolio ? ` • Final 15–20 only (${finalPortfolioCount})` : ""} •{" "}
+          {rankViewMode === "personalized" ? "Personalized rank" : "Objective rank"} •{" "}
+          {dashboardSortMode === "alphabetical" ? "Alphabetical A–Z" : "Stewardship rank order"}
         </Typography>
         <Alert severity="info" sx={{ mt: 1.5 }}>
           <Typography variant="body2">
-            List rank compares charities in the same mission area and subcategory. Global rank compares every organization on your list.
-            Personalized rank adds a small capped donor-confidence boost from prior giving history.
+            Recommendation and confidence come first. Stewardship score summarizes comparable financial and accountability data. Impact evidence level and review flags explain what the score does not capture. Use list rank within a mission bucket — not global rank alone.
+            Objective rank is the default. Personalized rank (optional) adds a small capped boost from prior giving history.
           </Typography>
         </Alert>
-        {preliminaryOnlyCount > 0 && (
+        {(preliminaryCount > 0 || notResearchedCount > 0) && (
           <Alert severity="warning" sx={{ mt: 1.5 }}>
-            Preliminary score only — not enough verified data for final ranking.
+            Some organizations still need research — finish core fields before treating list rank as final.
           </Alert>
         )}
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1.5 }}>
           <Typography variant="body2">Research complete: {completeCount}</Typography>
           <Typography variant="body2">Research partial: {partialCount}</Typography>
           <Typography variant="body2">Research failed: {failedCount}</Typography>
-          <Typography variant="body2">Preliminary only: {preliminaryOnlyCount}</Typography>
+          <Typography variant="body2">Preliminary: {preliminaryCount}</Typography>
+          <Typography variant="body2">Not researched: {notResearchedCount}</Typography>
           <Typography variant="body2">
             Last research run: {latestRefresh ? new Date(latestRefresh).toLocaleString() : "Not yet"}
           </Typography>
@@ -126,6 +221,25 @@ export function DashboardPage() {
       </Paper>
 
       <Paper sx={{ p: 2 }}>
+        <Autocomplete
+          options={organizations}
+          value={searchSelection}
+          onChange={(_event, organization) => handleSearchSelect(organization)}
+          getOptionLabel={(organization) => organization.organizationName}
+          isOptionEqualToValue={(left, right) => left.id === right.id}
+          renderInput={(params) => <TextField {...params} label="Search charities" placeholder="Type a charity name..." />}
+          renderOption={(props, organization) => (
+            <Box component="li" {...props} key={organization.id}>
+              <Box>
+                <Typography>{organization.organizationName}</Typography>
+                <Typography color="text.secondary" variant="caption">
+                  {organization.rankingListLabel}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+          sx={{ mb: 2 }}
+        />
         <Box
           sx={{
             alignItems: { md: "center", xs: "flex-start" },
@@ -162,36 +276,34 @@ export function DashboardPage() {
               <MenuItem value="objective">Objective Rank</MenuItem>
             </Select>
           </FormControl>
+          <FormControl size="small" sx={{ minWidth: 240 }}>
+            <InputLabel id="dashboard-sort-label">Sort by</InputLabel>
+            <Select
+              labelId="dashboard-sort-label"
+              label="Sort by"
+              value={dashboardSortMode}
+              onChange={(event) => setDashboardSortMode(event.target.value as "rank" | "alphabetical")}
+            >
+              <MenuItem value="rank">Current stewardship/list ranking</MenuItem>
+              <MenuItem value="alphabetical">Alphabetical A–Z</MenuItem>
+            </Select>
+          </FormControl>
+          <Box sx={{ alignItems: "center", display: "flex", gap: 1 }}>
+            <Switch
+              checked={showOnlyFinalPortfolio}
+              disabled={finalPortfolioCount === 0}
+              onChange={(_event, checked) => setShowOnlyFinalPortfolio(checked)}
+            />
+            <Typography>
+              {showOnlyFinalPortfolio
+                ? `Final 15–20 only (${filteredOrganizations.length})`
+                : `Only Final 15–20 charities (${finalPortfolioCount})`}
+            </Typography>
+          </Box>
           <Box sx={{ alignItems: "center", display: "flex", gap: 1 }}>
             <Switch checked={showOnlyTopTen} onChange={(_event, checked) => setShowOnlyTopTen(checked)} />
             <Typography>{showOnlyTopTen ? "Showing Top 10" : "Showing all"}</Typography>
           </Box>
-        </Box>
-      </Paper>
-
-      <Paper sx={{ p: 2.5 }}>
-        <Typography variant="h6" gutterBottom>
-          Manual review queue (top priority only)
-        </Typography>
-        <Typography color="text.secondary" sx={{ mb: 1.5 }}>
-          Review this short list weekly to keep gifts focused and avoid spreading donations too thin.
-        </Typography>
-        {triageQuery.isLoading && <Typography>Loading triage queue...</Typography>}
-        {triageQuery.isError && <Alert severity="warning">Could not load triage queue.</Alert>}
-        {!triageQuery.isLoading && !triageQuery.data?.length && <Typography>No triage items right now.</Typography>}
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          {(triageQuery.data ?? []).slice(0, 8).map((item) => (
-            <Box
-              key={item.id}
-              sx={{ alignItems: "center", border: "1px solid #e3e7ef", borderRadius: 1.5, display: "flex", gap: 1.5, p: 1 }}
-            >
-              <Typography sx={{ flex: 1 }}>{item.organizationName}</Typography>
-              <Typography variant="body2">Priority {item.triagePriority}</Typography>
-              <Typography variant="body2">Worth {item.donationWorthinessScore}</Typography>
-              <Typography variant="body2">Conf {item.confidenceScore}%</Typography>
-              <Typography variant="body2">Missing {item.missingFieldsCount}</Typography>
-            </Box>
-          ))}
         </Box>
       </Paper>
 
@@ -208,6 +320,7 @@ export function DashboardPage() {
             organization={organization}
             rankViewMode={rankViewMode}
             showGlobalRanks={rankingListFilter === ALL_ORGANIZATIONS_LIST_KEY}
+            highlighted={highlightedOrganizationId === organization.id}
           />
         ))}
       </Box>

@@ -1,5 +1,7 @@
 import { Alert, Box, CircularProgress, Paper, Typography } from "@mui/material"
 import { useResearchAuditQuery } from "../hooks/use-research-audit-query"
+import { formatResearchStatusLabel } from "../utils/ranking-display-labels"
+import type { RankingStatus } from "../types/organization"
 
 export function ResearchAuditPage() {
   const { data, isLoading, isError } = useResearchAuditQuery()
@@ -24,7 +26,7 @@ export function ResearchAuditPage() {
           Research Audit
         </Typography>
         <Typography color="text.secondary">
-          This page checks whether rankings are truly verified or still preliminary.
+          This page checks research coverage and whether stewardship scores are spread enough to compare organizations.
         </Typography>
       </Paper>
 
@@ -44,8 +46,8 @@ export function ResearchAuditPage() {
           <Typography>ProPublica/Form 990 data: {data.stats.proPublicaForm990Count}</Typography>
           <Typography>Political notes available: {data.stats.politicalNotesCount}</Typography>
           <Typography>Impact evidence notes available: {data.stats.impactEvidenceNotesCount}</Typography>
-          <Typography>Verified rankings: {data.stats.verifiedRankingCount}</Typography>
-          <Typography>Preliminary only: {data.stats.preliminaryOnlyCount}</Typography>
+          <Typography>Research complete: {data.stats.verifiedRankingCount}</Typography>
+          <Typography>Preliminary: {data.stats.preliminaryCount}</Typography>
         </Box>
       </Paper>
 
@@ -56,7 +58,7 @@ export function ResearchAuditPage() {
         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
           {Object.entries(data.rankingStatusCounts).map(([status, count]) => (
             <Typography key={status}>
-              {status}: {count}
+              {formatResearchStatusLabel(status as RankingStatus)}: {count}
             </Typography>
           ))}
         </Box>

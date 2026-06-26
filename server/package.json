@@ -4,14 +4,21 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsc -p tsconfig.json && node dist/index.js",
+    "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "research:free": "tsc -p tsconfig.json && node dist/scripts/run-free-research.js",
+    "migrate:stewardship-fields": "tsc -p tsconfig.json && node dist/scripts/migrate-stewardship-fields.js migrate",
+    "validate:stewardship-fields": "tsc -p tsconfig.json && node dist/scripts/migrate-stewardship-fields.js validate",
+    "migrate:ranking-status-labels": "tsc -p tsconfig.json && node dist/scripts/migrate-ranking-status-labels.js migrate",
+    "validate:ranking-status-labels": "tsc -p tsconfig.json && node dist/scripts/migrate-ranking-status-labels.js validate",
+    "migrate:remove-political-review-flag": "tsc -p tsconfig.json && node dist/scripts/migrate-remove-political-review-flag.js migrate",
+    "validate:remove-political-review-flag": "tsc -p tsconfig.json && node dist/scripts/migrate-remove-political-review-flag.js validate"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Donation ranking API server",
+  "description": "Stewardship ranking API server",
   "dependencies": {
     "cors": "^2.8.6",
     "csv-parse": "^6.2.1",

@@ -1,0 +1,76 @@
+.print-page {
+  margin: 0 auto;
+  max-width: 900px;
+  padding: 24px;
+}
+
+.print-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.print-header {
+  border-bottom: 2px solid #1f2937;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+}
+
+.print-title {
+  font-weight: 700;
+}
+
+.print-section {
+  break-inside: avoid;
+  margin-bottom: 24px;
+}
+
+.print-decision-box {
+  background: #f8fafc;
+  border: 1px solid #d0d7e2;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.print-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.print-table {
+  border-collapse: collapse;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.print-table th,
+.print-table td {
+  border-bottom: 1px solid #d0d7e2;
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.print-table th {
+  font-weight: 600;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-page {
+    max-width: none;
+    padding: 0;
+  }
+
+  .print-section {
+    page-break-inside: avoid;
+  }
+}

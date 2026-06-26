@@ -3,15 +3,25 @@ import { constants } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import type { DonationRecord, Organization, OrganizationAddress } from "../types/organization.js"
+import type { DonationRecord, Organization, OrganizationAddress, ScoreBreakdown } from "../types/organization.js"
 import { createOrganizationFromInput, loadSeedOrganizationsFromCsv } from "./csv-seed-service.js"
 import { getCurrentYearDonationTotal, syncDonationDerivedFields } from "./donation-service.js"
 import { rankOrganizations } from "./ranking-service.js"
+import { resolveStewardshipScoreFields } from "./stewardship-score-fields.js"
+import { normalizeRankingStatus, normalizeRecommendation } from "./ranking-label-fields.js"
+import {
+  resolveAdvocacyReviewStatusInput,
+  stripLegacyPoliticalReviewFlag,
+} from "./advocacy-review-service.js"
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
-const DATA_DIRECTORY = resolve(currentDirectory, "..", "..", "data")
-const ORGANIZATIONS_PATH = resolve(DATA_DIRECTORY, "organizations.json")
-const REFRESH_LOG_PATH = resolve(DATA_DIRECTORY, "refresh-log.json")
+const BUNDLED_DATA_DIRECTORY = resolve(currentDirectory, "..", "..", "data")
+const BUNDLED_ORGANIZATIONS_PATH = resolve(BUNDLED_DATA_DIRECTORY, "organizations.json")
+const ACTIVE_DATA_DIRECTORY = process.env.VERCEL
+  ? resolve("/tmp", "donation-rank-data")
+  : BUNDLED_DATA_DIRECTORY
+const ORGANIZATIONS_PATH = resolve(ACTIVE_DATA_DIRECTORY, "organizations.json")
+const REFRESH_LOG_PATH = resolve(ACTIVE_DATA_DIRECTORY, "refresh-log.json")
 
 let cachedOrganizations: Organization[] | null = null
 
@@ -60,79 +70,129 @@ function normalizeAddress(organization: Organization): OrganizationAddress {
   }
 }
 
-function normalizeOrganization(organization: Organization): Organization {
-  const donations = migrateLegacyDonation(organization)
+export function normalizeOrganization(organization: Organization): Organization {
+  const rawOrganization = organization as Organization & { politicalReviewFlag?: boolean }
+  const advocacyReviewStatus = resolveAdvocacyReviewStatusInput(rawOrganization, "not_reviewed")
+  const strippedOrganization = stripLegacyPoliticalReviewFlag(
+    organization as unknown as Record<string, unknown>,
+  ) as unknown as Organization
+  const donations = migrateLegacyDonation(strippedOrganization)
+  const stewardshipFields = resolveStewardshipScoreFields(strippedOrganization)
   const normalized: Organization = {
-    ...organization,
-    sourceMeta: organization.sourceMeta ?? {},
-    researchStatus: organization.researchStatus ?? "not_started",
-    researchAttempts: organization.researchAttempts ?? 0,
-    researchErrors: organization.researchErrors ?? [],
+    ...strippedOrganization,
+    ...stewardshipFields,
+    sourceMeta: strippedOrganization.sourceMeta ?? {},
+    researchStatus: strippedOrganization.researchStatus ?? "not_started",
+    researchAttempts: strippedOrganization.researchAttempts ?? 0,
+    researchErrors: strippedOrganization.researchErrors ?? [],
     donations,
-    address: normalizeAddress(organization),
-    rankingStatus: organization.rankingStatus ?? "Not Researched",
-    preliminaryScore: organization.preliminaryScore ?? 0,
-    verifiedDonationWorthinessScore: organization.verifiedDonationWorthinessScore ?? null,
-    objectiveDonationWorthinessScore: organization.objectiveDonationWorthinessScore ?? organization.donationWorthinessScore ?? 0,
-    personalizedDonationWorthinessScore:
-      organization.personalizedDonationWorthinessScore ?? organization.donationWorthinessScore ?? 0,
-    donorConfidenceAdjustment: organization.donorConfidenceAdjustment ?? 0,
-    donorConfidenceReason: organization.donorConfidenceReason ?? "No donor history signal applied.",
-    objectiveRank: organization.objectiveRank ?? 0,
-    personalizedRank: organization.personalizedRank ?? 0,
-    globalObjectiveRank: organization.globalObjectiveRank ?? organization.objectiveRank ?? 0,
-    globalPersonalizedRank: organization.globalPersonalizedRank ?? organization.personalizedRank ?? 0,
-    listObjectiveRank: organization.listObjectiveRank ?? organization.objectiveRank ?? 0,
-    listPersonalizedRank: organization.listPersonalizedRank ?? organization.personalizedRank ?? 0,
-    rankingListSize: organization.rankingListSize ?? 0,
-    rankShift: organization.rankShift ?? 0,
-    rankShiftReason: organization.rankShiftReason ?? "No personalized adjustment was applied.",
-    donationWorthinessScore: organization.donationWorthinessScore ?? 0,
-    impactEvidenceScore: organization.impactEvidenceScore ?? 0,
-    accountabilityScore: organization.accountabilityScore ?? 0,
-    financialEfficiencyScore: organization.financialEfficiencyScore ?? null,
-    financialEfficiencyStatus: organization.financialEfficiencyStatus ?? "unknown",
-    governanceScore: organization.governanceScore ?? 0,
-    politicalRiskScore: organization.politicalRiskScore ?? 0,
-    confidenceScore: organization.confidenceScore ?? 0,
-    recommendation: organization.recommendation ?? "Review Before Donating",
+    address: normalizeAddress(strippedOrganization),
+    rankingStatus: normalizeRankingStatus(strippedOrganization.rankingStatus ?? "Not Researched"),
+    donorConfidenceAdjustment: strippedOrganization.donorConfidenceAdjustment ?? 0,
+    donorConfidenceReason: strippedOrganization.donorConfidenceReason ?? "No donor history signal applied.",
+    objectiveRank: strippedOrganization.objectiveRank ?? 0,
+    personalizedRank: strippedOrganization.personalizedRank ?? 0,
+    globalObjectiveRank: strippedOrganization.globalObjectiveRank ?? strippedOrganization.objectiveRank ?? 0,
+    globalPersonalizedRank: strippedOrganization.globalPersonalizedRank ?? strippedOrganization.personalizedRank ?? 0,
+    listObjectiveRank: strippedOrganization.listObjectiveRank ?? strippedOrganization.objectiveRank ?? 0,
+    listPersonalizedRank: strippedOrganization.listPersonalizedRank ?? strippedOrganization.personalizedRank ?? 0,
+    rankingListSize: strippedOrganization.rankingListSize ?? 0,
+    rankShift: strippedOrganization.rankShift ?? 0,
+    rankShiftReason: strippedOrganization.rankShiftReason ?? "No personalized adjustment was applied.",
+    legalVerificationStatus: strippedOrganization.legalVerificationStatus ?? "Insufficient Data",
+    missionFitScore: strippedOrganization.missionFitScore ?? 70,
+    impactEvidenceLevel: strippedOrganization.impactEvidenceLevel ?? "Not comparable / insufficient evidence",
+    financialCompletenessStatus: strippedOrganization.financialCompletenessStatus ?? "missing",
+    watchdogReviewRequired: strippedOrganization.watchdogReviewRequired ?? false,
+    advocacyReviewStatus,
+    rankingModelVersion: strippedOrganization.rankingModelVersion ?? "stewardship-v1",
+    impactEvidenceScore: strippedOrganization.impactEvidenceScore ?? 0,
+    accountabilityScore: strippedOrganization.accountabilityScore ?? 0,
+    financialEfficiencyScore: strippedOrganization.financialEfficiencyScore ?? null,
+    financialEfficiencyStatus: strippedOrganization.financialEfficiencyStatus ?? "unknown",
+    governanceScore: strippedOrganization.governanceScore ?? 0,
+    politicalRiskScore: strippedOrganization.politicalRiskScore ?? 0,
+    confidenceScore: strippedOrganization.confidenceScore ?? 0,
+    confidenceBand: strippedOrganization.confidenceBand ?? "Low",
+    scoreBand: strippedOrganization.scoreBand ?? "Insufficient Data",
+    organizationSize: strippedOrganization.organizationSize ?? "unknown",
+    identityVerified: strippedOrganization.identityVerified ?? false,
+    financialsVerified: strippedOrganization.financialsVerified ?? false,
+    impactDocumented: strippedOrganization.impactDocumented ?? false,
+    politicalReviewed: strippedOrganization.politicalReviewed ?? false,
+    recommendation: normalizeRecommendation(strippedOrganization.recommendation ?? "Review Before Donating"),
     donationAmountAssessment:
-      organization.donationAmountAssessment ?? "No assessment yet. Run research to generate guidance.",
-    suggestedDonationAction: organization.suggestedDonationAction ?? "Needs quick review before donating.",
-    suggestedDonationLevel: organization.suggestedDonationLevel ?? "Research First",
-    legacyEligible: organization.legacyEligible ?? false,
-    legacyTier: organization.legacyTier ?? "Not Legacy Eligible",
-    legacyRationale: organization.legacyRationale ?? "Legacy criteria are not yet met.",
-    missionBucket: organization.missionBucket ?? "Other",
-    rankingListKey: organization.rankingListKey ?? "",
-    rankingListLabel: organization.rankingListLabel ?? organization.missionBucket ?? "Other",
-    compactGivingRole: organization.compactGivingRole ?? "Watchlist",
-    politicalInvolvementNotes: organization.politicalInvolvementNotes ?? "",
-    impactEvidenceNotes: organization.impactEvidenceNotes ?? "",
-    accountabilityNotes: organization.accountabilityNotes ?? "",
-    redFlags: organization.redFlags ?? [],
-    nextAction: organization.nextAction ?? "Needs quick review.",
-    criticalMissingFields: organization.criticalMissingFields ?? [],
-    strongestNextResearchStep: organization.strongestNextResearchStep ?? "Find EIN",
-    charityNavigatorRating: organization.charityNavigatorRating ?? null,
-    charityNavigatorProfileUrl: organization.charityNavigatorProfileUrl ?? "",
-    charityNavigatorAlert: organization.charityNavigatorAlert ?? "",
-    charityWatchGrade: organization.charityWatchGrade ?? null,
-    aceRecommendation: organization.aceRecommendation ?? null,
+      strippedOrganization.donationAmountAssessment ?? "No assessment yet. Run research to generate guidance.",
+    suggestedDonationAction: strippedOrganization.suggestedDonationAction ?? "Needs quick review before donating.",
+    suggestedDonationLevel: strippedOrganization.suggestedDonationLevel ?? "Research First",
+    legacyEligible: strippedOrganization.legacyEligible ?? false,
+    legacyTier: strippedOrganization.legacyTier ?? "Not Legacy Eligible",
+    legacyRationale: strippedOrganization.legacyRationale ?? "Legacy criteria are not yet met.",
+    legacyExclusionReason: strippedOrganization.legacyExclusionReason ?? null,
+    missionBucket: strippedOrganization.missionBucket ?? "Other",
+    rankingListKey: strippedOrganization.rankingListKey ?? "",
+    rankingListLabel: strippedOrganization.rankingListLabel ?? strippedOrganization.missionBucket ?? "Other",
+    compactGivingRole: strippedOrganization.compactGivingRole ?? "Watchlist",
+    politicalInvolvementNotes: strippedOrganization.politicalInvolvementNotes ?? "",
+    impactEvidenceNotes: strippedOrganization.impactEvidenceNotes ?? "",
+    accountabilityNotes: strippedOrganization.accountabilityNotes ?? "",
+    impactSourceTier: strippedOrganization.impactSourceTier ?? "none",
+    quantifiedOutcomeCount: strippedOrganization.quantifiedOutcomeCount ?? 0,
+    impactDataYear: strippedOrganization.impactDataYear ?? null,
+    redFlags: strippedOrganization.redFlags ?? [],
+    nextAction: strippedOrganization.nextAction ?? "Needs quick review.",
+    criticalMissingFields: strippedOrganization.criticalMissingFields ?? [],
+    strongestNextResearchStep: strippedOrganization.strongestNextResearchStep ?? "Find EIN",
+    duplicateMission: strippedOrganization.duplicateMission ?? "",
+    duplicateMissionGroup: strippedOrganization.duplicateMissionGroup ?? "",
+    duplicateMissionRole: strippedOrganization.duplicateMissionRole ?? "",
+    manualOverlapGroupKey: strippedOrganization.manualOverlapGroupKey ?? "",
+    manualOverlapGroupLabel: strippedOrganization.manualOverlapGroupLabel ?? "",
+    checkPayeeName: strippedOrganization.checkPayeeName ?? "",
+    donationMailingAddressLine1: strippedOrganization.donationMailingAddressLine1 ?? "",
+    donationMailingAddressLine2: strippedOrganization.donationMailingAddressLine2 ?? "",
+    donationMailingCity: strippedOrganization.donationMailingCity ?? "",
+    donationMailingState: strippedOrganization.donationMailingState ?? "",
+    donationMailingZip: strippedOrganization.donationMailingZip ?? "",
+    donationMailingCountry: strippedOrganization.donationMailingCountry ?? "",
+    advisorExportNotes: strippedOrganization.advisorExportNotes ?? "",
+    charityNavigatorRating: strippedOrganization.charityNavigatorRating ?? null,
+    charityNavigatorProfileUrl: strippedOrganization.charityNavigatorProfileUrl ?? "",
+    charityNavigatorAlert: strippedOrganization.charityNavigatorAlert ?? "",
+    charityWatchGrade: strippedOrganization.charityWatchGrade ?? null,
+    aceRecommendation: strippedOrganization.aceRecommendation ?? null,
     approximateAnnualDonation:
-      donations.length > 0 ? getCurrentYearDonationTotal(donations) : organization.approximateAnnualDonation ?? 0,
+      donations.length > 0 ? getCurrentYearDonationTotal(donations) : strippedOrganization.approximateAnnualDonation ?? 0,
   }
 
-  return normalized
+  return {
+    ...normalized,
+    scoreBreakdown: normalized.scoreBreakdown
+      ? ({
+          ...stripLegacyPoliticalReviewFlag(normalized.scoreBreakdown as unknown as Record<string, unknown>),
+          rankingStatus: normalizeRankingStatus(normalized.scoreBreakdown.rankingStatus),
+          recommendation: normalizeRecommendation(normalized.scoreBreakdown.recommendation),
+          advocacyReviewStatus: resolveAdvocacyReviewStatusInput(
+            normalized.scoreBreakdown as ScoreBreakdown & { politicalReviewFlag?: boolean },
+            advocacyReviewStatus,
+          ),
+        } as ScoreBreakdown)
+      : normalized.scoreBreakdown,
+  }
 }
 
 async function ensureSeededFile(): Promise<void> {
-  await mkdir(DATA_DIRECTORY, { recursive: true })
+  await mkdir(ACTIVE_DATA_DIRECTORY, { recursive: true })
   try {
     await access(ORGANIZATIONS_PATH, constants.F_OK)
   } catch {
-    const seedOrganizations = await loadSeedOrganizationsFromCsv()
-    await writeFile(ORGANIZATIONS_PATH, JSON.stringify(seedOrganizations, null, 2), "utf-8")
+    try {
+      const bundledContent = await readFile(BUNDLED_ORGANIZATIONS_PATH, "utf-8")
+      await writeFile(ORGANIZATIONS_PATH, bundledContent, "utf-8")
+    } catch {
+      const seedOrganizations = await loadSeedOrganizationsFromCsv()
+      await writeFile(ORGANIZATIONS_PATH, JSON.stringify(seedOrganizations, null, 2), "utf-8")
+    }
   }
 }
 
@@ -168,9 +228,14 @@ export async function addOrganization(input: Partial<Organization>): Promise<Org
   const newOrganization = createOrganizationFromInput(input)
   const organizations = await readStoredOrganizations()
   organizations.push(newOrganization)
-  cachedOrganizations = organizations
-  await writeOrganizations(organizations)
-  return newOrganization
+  const rankedOrganizations = rankOrganizations(organizations.map(syncDonationDerivedFields))
+  const savedOrganization = rankedOrganizations.find((organization) => organization.id === newOrganization.id)
+  if (!savedOrganization) {
+    throw new Error("Failed to save organization.")
+  }
+  cachedOrganizations = rankedOrganizations
+  await writeOrganizations(rankedOrganizations)
+  return savedOrganization
 }
 
 export async function updateOrganizations(organizations: Organization[]): Promise<void> {

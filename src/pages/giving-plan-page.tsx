@@ -1,5 +1,6 @@
 import { Alert, Box, CircularProgress, Paper, Typography } from "@mui/material"
 import { useGivingPlanQuery } from "../hooks/use-giving-plan-query"
+import { formatResearchStatusLabel } from "../utils/ranking-display-labels"
 
 export function GivingPlanPage() {
   const { data, isLoading, isError } = useGivingPlanQuery()
@@ -40,26 +41,26 @@ export function GivingPlanPage() {
           <Typography sx={{ mt: 1.25 }}>{group.consolidationReason}</Typography>
 
           <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle2">Top verified organizations</Typography>
+            <Typography variant="subtitle2">Top research-complete organizations</Typography>
             <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 0.5 }}>
               {group.topRecommended.length === 0 && <Typography color="text.secondary">No top recommendations yet.</Typography>}
               {group.topRecommended.map((organization) => (
                 <Typography key={organization.id}>
-                  • {organization.organizationName} ({organization.recommendation}, verified {organization.verifiedDonationWorthinessScore})
+                  • {organization.organizationName} ({organization.recommendation}, stewardship {organization.verifiedStewardshipScore})
                 </Typography>
               ))}
             </Box>
           </Box>
 
           <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle2">Promising but unverified organizations</Typography>
+            <Typography variant="subtitle2">Promising but research-incomplete organizations</Typography>
             <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 0.5 }}>
               {group.promisingUnverified.length === 0 && (
-                <Typography color="text.secondary">No promising unverified organizations right now.</Typography>
+                <Typography color="text.secondary">No promising research-incomplete organizations right now.</Typography>
               )}
               {group.promisingUnverified.map((organization) => (
                 <Typography key={organization.id}>
-                  • {organization.organizationName} ({organization.rankingStatus}, preliminary {organization.preliminaryScore})
+                  • {organization.organizationName} ({formatResearchStatusLabel(organization.rankingStatus)}, preliminary stewardship {organization.preliminaryStewardshipScore})
                 </Typography>
               ))}
             </Box>

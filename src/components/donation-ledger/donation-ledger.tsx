@@ -32,10 +32,12 @@ interface DonationFormState {
   note: string
 }
 
-const EMPTY_FORM: DonationFormState = {
-  date: new Date().toISOString().slice(0, 10),
-  amount: "",
-  note: "",
+function createEmptyForm(): DonationFormState {
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    amount: "",
+    note: "",
+  }
 }
 
 function formatCurrency(amount: number): string {
@@ -51,7 +53,7 @@ function formatDate(date: string): string {
 }
 
 export function DonationLedger({ organizationId, donationSummaries }: DonationLedgerProps) {
-  const [form, setForm] = useState<DonationFormState>(EMPTY_FORM)
+  const [form, setForm] = useState<DonationFormState>(createEmptyForm)
   const [editingDonation, setEditingDonation] = useState<DonationRecord | null>(null)
   const addDonation = useAddDonationMutation(organizationId)
   const updateDonation = useUpdateDonationMutation(organizationId)
@@ -64,8 +66,11 @@ export function DonationLedger({ organizationId, donationSummaries }: DonationLe
   )
 
   function resetForm() {
-    setForm(EMPTY_FORM)
+    setForm(createEmptyForm())
     setEditingDonation(null)
+    addDonation.reset()
+    updateDonation.reset()
+    deleteDonation.reset()
   }
 
   function handleSubmit() {
@@ -113,6 +118,7 @@ export function DonationLedger({ organizationId, donationSummaries }: DonationLe
   }
 
   const isSaving = addDonation.isPending || updateDonation.isPending
+  const saveError = addDonation.error ?? updateDonation.error ?? deleteDonation.error
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -120,6 +126,8 @@ export function DonationLedger({ organizationId, donationSummaries }: DonationLe
         Log each gift when you donate. Totals are grouped by calendar year. This year&apos;s total drives your
         personalized ranking boost.
       </Alert>
+
+      {saveError && <Alert severity="error">Could not save donation. Please try again.</Alert>}
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -162,7 +170,7 @@ export function DonationLedger({ organizationId, donationSummaries }: DonationLe
           sx={{ mb: 2 }}
         />
         <Stack direction="row" spacing={1}>
-          <Button variant="contained" onClick={handleSubmit} disabled={isSaving}>
+          <Button variant="contained" onClick={handleSubmit} disabled={isSaving || !form.amount.trim()}>
             {isSaving ? "Saving..." : editingDonation ? "Save changes" : "Add donation"}
           </Button>
           {editingDonation && (

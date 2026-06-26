@@ -9,25 +9,52 @@ import type {
   SuggestedDonationLevel,
 } from "../types/organization.js"
 
-export const DONATION_WORTHINESS_WEIGHTS = {
-  impactEvidence: 30,
-  accountability: 25,
-  financialEfficiency: 30,
-  governance: 10,
-  politicalRisk: 5,
+export const STEWARDSHIP_WEIGHTS = {
+  financialEfficiency: 35,
+  accountability: 35,
+  governance: 20,
+  missionFit: 10,
 } as const
+
+export const RANKING_MODEL_VERSION = "stewardship-v1" as const
 
 export const RANKING_LIST_GENERAL_SUBCATEGORY = "General"
 
 export const RECOMMENDATION_THRESHOLDS = {
-  priorityFundScoreMin: 85,
-  keepScoreMin: 70,
+  priorityFundScoreMin: 78,
+  keepScoreMin: 68,
   reviewScoreMin: 55,
   reduceScoreMin: 40,
-  highConfidenceMin: 75,
+  highConfidenceMin: 90,
   partiallyVerifiedMin: 50,
-  verifiedMin: 75,
-  legacyMin: 85,
+  verifiedMin: 85,
+  legacyMin: 78,
+  priorityFundConfidenceMin: 90,
+  keepConfidenceMin: 80,
+  accountabilityMinForKeep: 65,
+  accountabilityMinForReduce: 45,
+  stewardshipMinForReduce: 45,
+  reviewConfidenceMax: 60,
+  keepSmallConfidenceMax: 84,
+} as const
+
+export const RANKING_VERIFICATION = {
+  verifiedConfidenceMin: 85,
+} as const
+
+export const CONFIDENCE_BAND_THRESHOLDS = {
+  high: 90,
+  medium: 70,
+} as const
+
+export const SCORE_BAND_THRESHOLDS = {
+  exceptional: 78,
+  strong: 68,
+  adequate: 55,
+} as const
+
+export const GIVING_PLAN_LIMITS = {
+  maxTopRecommendedPerBucket: 4,
 } as const
 
 export const PERSONALIZED_RANKING_RULES = {
@@ -38,7 +65,7 @@ export const PERSONALIZED_RANKING_RULES = {
 export const SUGGESTED_DONATION_LEVEL_BY_RECOMMENDATION: Record<Recommendation, SuggestedDonationLevel> = {
   "Priority Fund": "Core Annual Gift",
   Keep: "Small Recurring Gift",
-  "Keep Small Until Verified": "Small Recurring Gift",
+  "Keep Small Until Research Complete": "Small Recurring Gift",
   Reduce: "One-Time Small Gift",
   "Small Test Donation": "One-Time Small Gift",
   "Review Before Donating": "Research First",
@@ -46,12 +73,18 @@ export const SUGGESTED_DONATION_LEVEL_BY_RECOMMENDATION: Record<Recommendation, 
 }
 
 export const LEGACY_RULES = {
-  scoreMin: 80,
-  confidenceMin: 85,
-  accountabilityMin: 65,
+  confidenceMin: 90,
+  accountabilityMin: 70,
   financialEfficiencyMin: 60,
   politicalRiskMin: 60,
+  impactMin: 65,
+  legacyCoreScoreMin: 82,
+  legacyCoreConfidenceMin: 92,
+  stewardshipScoreMin: 78,
+  requiresBasicImpactEvidence: true,
 } as const
+
+export const MISSION_FIT_DEFAULT_SCORE = 70 as const
 
 export const LEGACY_TIERS: LegacyTier[] = [
   "Legacy Core",
@@ -90,9 +123,9 @@ export const DEFAULT_LEGACY_MISSION_ALLOCATION: Record<LegacyMissionArea, number
 
 export const RANKING_STATUSES: RankingStatus[] = [
   "Not Researched",
-  "Preliminary Only",
-  "Partially Verified",
-  "Verified Ranking",
+  "Preliminary",
+  "Research Partial",
+  "Research Complete",
   "Do Not Fund / Red Flag",
 ]
 
@@ -101,6 +134,7 @@ export const SOURCE_TYPE_KEYWORDS: Record<SourceType, string[]> = {
   "ProPublica/Form 990": ["propublica", "form 990", "990"],
   "Charity Navigator": ["charity navigator"],
   "Candid/GuideStar": ["candid", "guidestar"],
+  "Cause IQ": ["cause iq"],
   CharityWatch: ["charitywatch"],
   "BBB Wise Giving Alliance": ["bbb", "wise giving"],
   "Animal Charity Evaluators": ["animal charity evaluators", "ace"],
@@ -114,6 +148,7 @@ export const SOURCE_RELIABILITY_BY_TYPE: Record<SourceType, SourceReliability> =
   "ProPublica/Form 990": "high",
   "Charity Navigator": "high",
   "Candid/GuideStar": "high",
+  "Cause IQ": "high",
   CharityWatch: "medium",
   "BBB Wise Giving Alliance": "medium",
   "Animal Charity Evaluators": "medium",
@@ -129,6 +164,7 @@ export const TRIAGE_RESEARCH_CHECKLIST = [
   "Find program/fundraising/admin percentages",
   "Check Charity Navigator",
   "Check Candid/GuideStar",
+  "Check Cause IQ profile",
   "Check ProPublica",
   "Check CharityWatch/BBB if available",
   "Check annual report or impact report",

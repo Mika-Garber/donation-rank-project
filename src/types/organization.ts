@@ -1,11 +1,14 @@
 export type ScoreLevel = "Strong" | "Good" | "Moderate" | "Low" | "Unknown"
 
+export type ScoreCategoryType = "gate" | "stewardship" | "badge" | "flag"
+
 export interface ScoreCategoryExplanation {
   key: string
   title: string
   score: number | null
   maxPoints?: number
   weightPercent: number
+  categoryType?: ScoreCategoryType
   level: ScoreLevel
   whatItMeasures: string
   whyThisScore: string
@@ -27,11 +30,48 @@ export interface OrganizationDetailExplanation {
   missingDataNote: string | null
 }
 
-export interface ScoreBreakdown {
-  preliminaryScore: number
-  verifiedDonationWorthinessScore: number | null
-  objectiveDonationWorthinessScore: number
-  personalizedDonationWorthinessScore: number
+export type ConfidenceBand = "High" | "Medium" | "Low"
+
+export type ScoreBand = "Exceptional" | "Strong" | "Adequate" | "Weak" | "Insufficient Data"
+
+export type OrganizationSize = "micro" | "small" | "mid" | "large" | "unknown"
+
+export type DuplicateMissionRole = "primary" | "secondary" | "phasing-out" | ""
+
+export type ImpactSourceTier = "evaluator" | "annual_report_pdf" | "website" | "cause_iq" | "form_990" | "none"
+
+export type LegalVerificationStatus =
+  | "Verified"
+  | "Needs Review"
+  | "Failed Verification"
+  | "Insufficient Data"
+
+export type ImpactEvidenceLevel =
+  | "Strong documented impact"
+  | "Basic documented impact"
+  | "Limited impact evidence"
+  | "Not comparable / insufficient evidence"
+
+export type FinancialCompletenessStatus = "complete" | "partial" | "missing"
+
+export type AdvocacyReviewStatus =
+  | "none_documented"
+  | "nonpartisan_documented"
+  | "notes_missing"
+  | "not_reviewed"
+  | "donor_comfort_review"
+  | "partisan_red_flag"
+
+export interface StewardshipScoreFields {
+  preliminaryStewardshipScore: number
+  verifiedStewardshipScore: number | null
+  objectiveStewardshipScore: number
+  personalizedStewardshipScore: number
+  stewardshipScore: number
+  stewardshipScoreLabel: string
+}
+
+export interface ScoreBreakdown extends StewardshipScoreFields {
   donorConfidenceAdjustment: number
   donorConfidenceReason: string
   objectiveRank?: number
@@ -43,8 +83,14 @@ export interface ScoreBreakdown {
   rankingListSize?: number
   rankShift?: number
   rankShiftReason: string
-  donationWorthinessScore: number
   rankingStatus: RankingStatus
+  legalVerificationStatus: LegalVerificationStatus
+  missionFitScore: number
+  impactEvidenceLevel: ImpactEvidenceLevel
+  financialCompletenessStatus: FinancialCompletenessStatus
+  watchdogReviewRequired: boolean
+  advocacyReviewStatus: AdvocacyReviewStatus
+  rankingModelVersion: string
   impactEvidenceScore: number
   accountabilityScore: number
   financialEfficiencyScore: number | null
@@ -52,6 +98,13 @@ export interface ScoreBreakdown {
   governanceScore: number
   politicalRiskScore: number
   confidenceScore: number
+  confidenceBand: ConfidenceBand
+  scoreBand: ScoreBand
+  organizationSize: OrganizationSize
+  identityVerified: boolean
+  financialsVerified: boolean
+  impactDocumented: boolean
+  politicalReviewed: boolean
   recommendation: Recommendation
   donationAmountAssessment: string
   suggestedDonationAction: string
@@ -59,6 +112,7 @@ export interface ScoreBreakdown {
   legacyEligible: boolean
   legacyTier: LegacyTier
   legacyRationale: string
+  legacyExclusionReason: string | null
   missionBucket: MissionBucket
   rankingListKey: string
   rankingListLabel: string
@@ -66,6 +120,9 @@ export interface ScoreBreakdown {
   politicalInvolvementNotes: string
   impactEvidenceNotes: string
   accountabilityNotes: string
+  impactSourceTier: ImpactSourceTier
+  quantifiedOutcomeCount: number
+  impactDataYear: number | null
   redFlags: string[]
   nextAction: string
   criticalMissingFields: string[]
@@ -78,7 +135,7 @@ export interface ScoreBreakdown {
 export type Recommendation =
   | "Priority Fund"
   | "Keep"
-  | "Keep Small Until Verified"
+  | "Keep Small Until Research Complete"
   | "Reduce"
   | "Small Test Donation"
   | "Review Before Donating"
@@ -86,9 +143,9 @@ export type Recommendation =
 
 export type RankingStatus =
   | "Not Researched"
-  | "Preliminary Only"
-  | "Partially Verified"
-  | "Verified Ranking"
+  | "Preliminary"
+  | "Research Partial"
+  | "Research Complete"
   | "Do Not Fund / Red Flag"
 
 export type SourceType =
@@ -96,6 +153,7 @@ export type SourceType =
   | "ProPublica/Form 990"
   | "Charity Navigator"
   | "Candid/GuideStar"
+  | "Cause IQ"
   | "CharityWatch"
   | "BBB Wise Giving Alliance"
   | "Animal Charity Evaluators"
@@ -175,6 +233,28 @@ export interface OrganizationAddress {
   country: string
 }
 
+export interface AdvisorExportFields {
+  checkPayeeName: string
+  donationMailingAddressLine1: string
+  donationMailingAddressLine2: string
+  donationMailingCity: string
+  donationMailingState: string
+  donationMailingZip: string
+  donationMailingCountry: string
+  advisorExportNotes: string
+}
+
+export interface AdvisorExportInput {
+  checkPayeeName?: string
+  donationMailingAddressLine1?: string
+  donationMailingAddressLine2?: string
+  donationMailingCity?: string
+  donationMailingState?: string
+  donationMailingZip?: string
+  donationMailingCountry?: string
+  advisorExportNotes?: string
+}
+
 export interface DonationYearSummary {
   year: string
   total: number
@@ -182,7 +262,7 @@ export interface DonationYearSummary {
   donations: DonationRecord[]
 }
 
-export interface Organization {
+export interface Organization extends StewardshipScoreFields, AdvisorExportFields {
   id: string
   organizationName: string
   category: string
@@ -202,6 +282,10 @@ export interface Organization {
   fundraisingPercent: number | null
   adminPercent: number | null
   duplicateMission: string
+  duplicateMissionGroup: string
+  duplicateMissionRole: DuplicateMissionRole
+  manualOverlapGroupKey: string
+  manualOverlapGroupLabel: string
   notes: string
   lastRefreshedAt: string | null
   sourceMeta: Record<string, SourceMeta>
@@ -209,10 +293,6 @@ export interface Organization {
   researchAttempts: number
   researchErrors: ResearchError[]
   rankingStatus: RankingStatus
-  preliminaryScore: number
-  verifiedDonationWorthinessScore: number | null
-  objectiveDonationWorthinessScore: number
-  personalizedDonationWorthinessScore: number
   donorConfidenceAdjustment: number
   donorConfidenceReason: string
   objectiveRank: number
@@ -224,7 +304,13 @@ export interface Organization {
   rankingListSize: number
   rankShift: number
   rankShiftReason: string
-  donationWorthinessScore: number
+  legalVerificationStatus: LegalVerificationStatus
+  missionFitScore: number
+  impactEvidenceLevel: ImpactEvidenceLevel
+  financialCompletenessStatus: FinancialCompletenessStatus
+  watchdogReviewRequired: boolean
+  advocacyReviewStatus: AdvocacyReviewStatus
+  rankingModelVersion: string
   impactEvidenceScore: number
   accountabilityScore: number
   financialEfficiencyScore: number | null
@@ -232,6 +318,13 @@ export interface Organization {
   governanceScore: number
   politicalRiskScore: number
   confidenceScore: number
+  confidenceBand: ConfidenceBand
+  scoreBand: ScoreBand
+  organizationSize: OrganizationSize
+  identityVerified: boolean
+  financialsVerified: boolean
+  impactDocumented: boolean
+  politicalReviewed: boolean
   recommendation: Recommendation
   donationAmountAssessment: string
   suggestedDonationAction: string
@@ -239,6 +332,7 @@ export interface Organization {
   legacyEligible: boolean
   legacyTier: LegacyTier
   legacyRationale: string
+  legacyExclusionReason: string | null
   missionBucket: MissionBucket
   rankingListKey: string
   rankingListLabel: string
@@ -246,6 +340,9 @@ export interface Organization {
   politicalInvolvementNotes: string
   impactEvidenceNotes: string
   accountabilityNotes: string
+  impactSourceTier: ImpactSourceTier
+  quantifiedOutcomeCount: number
+  impactDataYear: number | null
   redFlags: string[]
   nextAction: string
   criticalMissingFields: string[]
@@ -254,21 +351,26 @@ export interface Organization {
 }
 
 export interface RankingExplanation {
-  weights: {
-    impactEvidence: number
-    accountability: number
+  modelVersion: string
+  legalVerificationRule: string
+  stewardshipWeights: {
     financialEfficiency: number
+    accountability: number
     governance: number
-    politicalRisk: number
+    missionFit: number
   }
-  scoreRule: string
+  stewardshipScoreRule: string
+  financialCompletenessRule: string
+  impactEvidenceRule: string
+  watchdogReviewRule: string
+  politicalReviewRule: string
+  recommendationRule: string
   confidenceRule: string
-  donationAssessmentRule: string
-  legacyRule: string
   rankingStatusRule: string
-  preliminaryVsVerifiedRule: string
-  personalizedRankRule?: string
-  categoryListRule?: string
+  personalizedRankRule: string
+  legacyRule: string
+  donationAssessmentRule: string
+  categoryListRule: string
 }
 
 export interface RankingListSummary {
@@ -290,7 +392,7 @@ export interface TriageQueueItem {
   id: string
   organizationName: string
   confidenceScore: number
-  donationWorthinessScore: number
+  stewardshipScore: number
   approximateAnnualDonation: number
   missingFieldsCount: number
   recommendation: Recommendation
@@ -298,6 +400,233 @@ export interface TriageQueueItem {
   priorityReasons: string[]
   researchChecklist: string[]
   triagePriority: number
+}
+
+export interface PortfolioReviewOrganizationSummary {
+  id: string
+  organizationName: string
+  approximateAnnualDonation: number
+  objectiveStewardshipScore: number
+  stewardshipScore: number
+  impactEvidenceScore: number
+  impactEvidenceLevel: ImpactEvidenceLevel
+  confidenceScore: number
+  confidenceBand: ConfidenceBand
+  recommendation: Recommendation
+  rankingStatus: RankingStatus
+  stewardshipScoreLabel: string
+  legacyTier: LegacyTier
+  legacyEligible: boolean
+  rankingListLabel: string
+  listObjectiveRank: number
+  rankingListSize: number
+  listRankLabel: string
+  impactSourceTier: ImpactSourceTier
+  impactSourceTierLabel: string
+  quantifiedOutcomeCount: number
+  giftSharePercent: number
+  reviewFlag: string | null
+  duplicateMission: string
+  duplicateMissionGroup: string
+  duplicateMissionRole: DuplicateMissionRole
+}
+
+export interface PortfolioConsolidationSummary {
+  totalOrganizations: number
+  totalAnnualGiving: number
+  continueRecommendationCount: number
+  continueAnnualGiving: number
+  continueGivingSharePercent: number
+  priorityFundCount: number
+  keepCount: number
+  reviewOrReduceCount: number
+  legacyEligibleCount: number
+  legacyCoreCount: number
+  suggestedFocusMin: number
+  suggestedFocusMax: number
+  excessContinueCount: number
+  headline: string
+  guidance: string
+}
+
+export interface MissionOverlapGroupSummary {
+  groupId: string
+  groupLabel: string
+  organizationCount: number
+  totalAnnualGiving: number
+  hasPrimary: boolean
+  consolidationNote: string
+  organizations: PortfolioReviewOrganizationSummary[]
+}
+
+export interface PortfolioReviewResponse {
+  consolidation: PortfolioConsolidationSummary
+  topByAnnualGift: PortfolioReviewOrganizationSummary[]
+  highGiftOutliers: PortfolioReviewOrganizationSummary[]
+  researchGaps: PortfolioReviewOrganizationSummary[]
+  suggestedCoreCandidates: PortfolioReviewOrganizationSummary[]
+  missionOverlapGroups: MissionOverlapGroupSummary[]
+  ungroupedDuplicateFlags: PortfolioReviewOrganizationSummary[]
+}
+
+export type PortfolioRole =
+  | "Core Pick"
+  | "Category Leader"
+  | "Backup Candidate"
+  | "Unique Mission"
+  | "Overlapping / Lower Priority"
+  | "Review Before Core"
+  | "Phase Out Candidate"
+
+export type BroadPortfolioArea = "Animals" | "Human Services" | "Medical" | "Veterans" | "Environment" | "Other"
+
+export type SpeciesFocus =
+  | "dogs"
+  | "cats"
+  | "equine"
+  | "wildlife"
+  | "farm animals"
+  | "mixed animals"
+  | "none"
+
+export type InterventionType =
+  | "rescue adoption"
+  | "sanctuary"
+  | "tnr spay-neuter"
+  | "service dogs"
+  | "retired k9 care"
+  | "legal advocacy"
+  | "anti-cruelty"
+  | "wildlife conservation"
+  | "wildlife rehab"
+  | "national welfare"
+  | "local shelter"
+  | "international welfare"
+  | "disaster rescue"
+  | "medical care"
+  | "medical research"
+  | "human services"
+  | "farm animal sanctuary"
+  | "equine sanctuary"
+  | "special-needs rescue"
+  | "other"
+
+export type PortfolioGroupingStatus = "classified" | "needs_manual_review"
+
+export interface PortfolioConcentrationOrganization {
+  id: string
+  organizationName: string
+  broadPortfolioArea: BroadPortfolioArea
+  speciesFocus: SpeciesFocus
+  interventionType: InterventionType
+  overlapGroupKey: string
+  overlapGroupLabel: string
+  secondaryOverlapTags: string[]
+  groupingStatus: PortfolioGroupingStatus
+  groupRank: number
+  groupSize: number
+  portfolioRole: PortfolioRole
+  roleReason: string
+  missionBucket: MissionBucket
+  approximateAnnualDonation: number
+  stewardshipScore: number
+  objectiveStewardshipScore: number
+  recommendation: Recommendation
+  rankingStatus: RankingStatus
+  legalVerificationStatus: LegalVerificationStatus
+  financialCompletenessStatus: FinancialCompletenessStatus
+  impactEvidenceLevel: ImpactEvidenceLevel
+  watchdogReviewRequired: boolean
+  advocacyReviewStatus: AdvocacyReviewStatus
+  confidenceScore: number
+  confidenceBand: ConfidenceBand
+  listObjectiveRank: number
+  rankingListLabel: string
+}
+
+export interface PortfolioConcentrationGroup {
+  overlapGroupKey: string
+  overlapGroupLabel: string
+  broadPortfolioArea: BroadPortfolioArea
+  speciesFocus: SpeciesFocus
+  interventionType: InterventionType
+  organizationCount: number
+  categoryLeaderId: string | null
+  categoryLeaderName: string | null
+  suggestedCorePickId: string | null
+  suggestedCorePickName: string | null
+  suggestedDecisionSummary: string
+  needsReview: boolean
+  organizations: PortfolioConcentrationOrganization[]
+}
+
+export type ClientSuggestedAction =
+  | "Keep in final list"
+  | "Strong candidate"
+  | "Review before final list"
+  | "Similar to stronger charity"
+  | "Consider reducing"
+  | "Consider pausing"
+
+export interface PortfolioConcentrationClientCharity {
+  id: string
+  organizationName: string
+  area: string
+  whyItMadeTheList: string
+  currentGift: number
+  suggestedAction: ClientSuggestedAction
+}
+
+export interface PortfolioConcentrationReviewItem {
+  id: string
+  organizationName: string
+  concern: string
+  nextStep: string
+}
+
+export interface PortfolioConcentrationOverlapSummary {
+  overlapGroupLabel: string
+  bestCurrentPick: string | null
+  similarCharitiesToReview: string[]
+  suggestedDecision: string
+  totalKnownGiving: number
+}
+
+export interface PortfolioConcentrationSummary {
+  finalPortfolioTargetMin: number
+  finalPortfolioTargetMax: number
+  totalOrganizationsReviewed: number
+  recommendedCorePickCount: number
+  groupsWithCategoryLeaderCount: number
+  groupsNeedingReviewCount: number
+  overlappingLowerPriorityCount: number
+  phaseOutCandidateCount: number
+  needsManualGroupingReviewCount: number
+  suggestedCorePortfolioCount: number
+  headline: string
+  guidance: string
+  totalKnownAnnualGiving: number
+  suggestedCoreKnownAnnualGiving: number
+  missingGiftAmountCount: number
+  qualifiedCoreCandidateCount: number
+  suggestedFinalListCount: number
+  reviewBeforeFinalCount: number
+  clientHeadline: string
+  clientSubheadline: string
+  qualifiedVsSuggestedNote: string
+}
+
+export interface PortfolioConcentrationResponse {
+  summary: PortfolioConcentrationSummary
+  overlapGroups: PortfolioConcentrationGroup[]
+  suggestedCorePortfolio: PortfolioConcentrationOrganization[]
+  suggestedFinalList: PortfolioConcentrationClientCharity[]
+  reviewBeforeFinalDecision: PortfolioConcentrationReviewItem[]
+  importantOverlapGroups: PortfolioConcentrationOverlapSummary[]
+  groupsNeedingReview: PortfolioConcentrationGroup[]
+  overlappingOrganizations: PortfolioConcentrationOrganization[]
+  phaseOutCandidates: PortfolioConcentrationOrganization[]
+  needsManualGroupingReview: PortfolioConcentrationOrganization[]
 }
 
 export interface GivingPlanGroup {
@@ -344,7 +673,7 @@ export interface ResearchAuditStats {
   politicalNotesCount: number
   impactEvidenceNotesCount: number
   verifiedRankingCount: number
-  preliminaryOnlyCount: number
+  preliminaryCount: number
 }
 
 export interface WatchdogSetupStatus {

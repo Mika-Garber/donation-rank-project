@@ -5,13 +5,23 @@ import {
 } from "../config/watchdog-config.js"
 import {
   DEFAULT_LEGACY_MISSION_ALLOCATION,
-  DONATION_WORTHINESS_WEIGHTS,
+  GIVING_PLAN_LIMITS,
+  LEGACY_RULES,
   MISSION_BUCKETS,
+  RANKING_MODEL_VERSION,
   RANKING_STATUSES,
+  RECOMMENDATION_THRESHOLDS,
+  STEWARDSHIP_WEIGHTS,
   TRIAGE_RESEARCH_CHECKLIST,
 } from "../config/ranking-config.js"
 import { getOrganizations } from "../services/data-store-service.js"
+import { buildPortfolioConcentration } from "../services/portfolio-concentration-service.js"
+import { buildPortfolioReview } from "../services/portfolio-review-service.js"
 import { getScoreSpreadCheck } from "../services/ranking-service.js"
+import {
+  resolvePreliminaryStewardshipScore,
+  resolveVerifiedStewardshipScore,
+} from "../services/stewardship-score-fields.js"
 import { getWatchdogCatalogStats } from "../services/watchdog-catalog-service.js"
 import type { Organization } from "../types/organization.js"
 
@@ -20,27 +30,37 @@ export function rankingRouter(): Router {
 
   router.get("/explanation", (_request, response) => {
     response.json({
-      weights: {
-        impactEvidence: DONATION_WORTHINESS_WEIGHTS.impactEvidence,
-        accountability: DONATION_WORTHINESS_WEIGHTS.accountability,
-        financialEfficiency: DONATION_WORTHINESS_WEIGHTS.financialEfficiency,
-        governance: DONATION_WORTHINESS_WEIGHTS.governance,
-        politicalRisk: DONATION_WORTHINESS_WEIGHTS.politicalRisk,
+      modelVersion: RANKING_MODEL_VERSION,
+      legalVerificationRule:
+        "Legal verification is a gate before ranking: Verified, Needs Review, Failed Verification, or Insufficient Data. Failed verification or serious identity problems prevent positive recommendations.",
+      stewardshipWeights: {
+        financialEfficiency: STEWARDSHIP_WEIGHTS.financialEfficiency,
+        accountability: STEWARDSHIP_WEIGHTS.accountability,
+        governance: STEWARDSHIP_WEIGHTS.governance,
+        missionFit: STEWARDSHIP_WEIGHTS.missionFit,
       },
-      scoreRule:
-        "Each charity earns rubric points across five categories: legal identity (10), accountability (25), impact (30), financial efficiency (30), and political/advocacy alignment (5). Donation amount does not increase the score.",
+      stewardshipScoreRule:
+        "The Stewardship Score (0–100) combines financial efficiency 35%, accountability 35%, governance hygiene 20%, and mission fit 10% when financial data is complete. Impact evidence and political activity do not change this score. List rank is based on stewardship.",
+      financialCompletenessRule:
+        "All three verified ratios (program, fundraising, admin) are required for the financial component. If financials are missing or partial, that component is excluded and the remaining stewardship categories are renormalized. An asterisk on the score means financials were excluded.",
+      impactEvidenceRule:
+        "Impact evidence level (Strong, Basic, Limited, or Not comparable) is a separate label reflecting documentation quality. It is not part of the stewardship score. Priority Fund requires impact at least Basic.",
+      watchdogReviewRule:
+        "Poor CharityWatch grades (D/F) or Charity Navigator ratings (1–2 stars) trigger watchdog review, penalize accountability, and can cap recommendations at Review Before Donating.",
+      politicalReviewRule:
+        "Advocacy review uses a status label (none documented, nonpartisan documented, notes missing, not reviewed, donor comfort review, or partisan activity review). Only donor comfort review and partisan activity review cap recommendations. Missing or unreviewed advocacy notes affect confidence and triage but do not automatically cap high-stewardship organizations.",
+      recommendationRule:
+        "Pause for failed legal verification or serious red flags. Review for legal needs review, low confidence, watchdog, or advocacy flags. Keep requires strong stewardship without requiring high impact. Priority Fund requires strong stewardship, high confidence, and impact at least Basic.",
       confidenceRule:
-        "Confidence reflects how complete and verified the research is. Missing financial ratios, unclear legal identity, or stale sources lower confidence — review first, not automatic rejection.",
-      donationAssessmentRule:
-        "Current annual donation is reviewed separately to decide whether to keep, reduce, pause, or keep the gift small until verified.",
-      legacyRule:
-        "Legacy eligibility requires high score, high confidence, low risk, and verified legal/accountability foundations.",
+        "Confidence blends field completeness (70%) and source quality (30%), then adjusts for missing financials, legal status, weak impact comparability, bad watchdog signals, and failed research. Shown as High, Medium, or Low.",
       rankingStatusRule:
-        "Ranking status is gated by confidence and red flags: Not Researched, Preliminary Only, Partially Verified, Verified Ranking, or Do Not Fund / Red Flag.",
-      preliminaryVsVerifiedRule:
-        "Preliminary score is shown early, but a verified score is only used when confidence is high enough for a real ranking.",
+        "Research status (Preliminary, Research Partial, or Research Complete) reflects data completeness and is separate from legal verification and impact evidence level. Research Complete requires core identity, complete financial ratios, and confidence 85%+.",
       personalizedRankRule:
-        "Personalized rank adds a small, capped donor-confidence boost based on prior annual giving history. This adjusts ordering only and does not replace the objective score.",
+        "Objective rank is the default. Personalized rank adds a small capped donor-confidence boost from prior giving to the stewardship score — it does not change stewardship components.",
+      legacyRule:
+        `Legacy eligibility requires verified stewardship ${LEGACY_RULES.stewardshipScoreMin}+, confidence ${LEGACY_RULES.confidenceMin}%+, impact at least Basic, accountability ${LEGACY_RULES.accountabilityMin}/100+, and no red flags. Legacy Core is limited to top candidates per mission list.`,
+      donationAssessmentRule:
+        "Gift size review is separate from the stewardship score: current annual donation helps decide whether to keep, reduce, pause, or stay small until verified.",
       categoryListRule:
         "Organizations are ranked within mission-bucket lists (mission area plus subcategory when available). Each list compares similar charities only. An all-organizations view is also available for portfolio-wide comparison.",
     })
@@ -86,16 +106,16 @@ export function rankingRouter(): Router {
       if (!score) return reasons
 
       const highDonationLowConfidence =
-        organization.approximateAnnualDonation >= 250 && score.confidenceScore < 70 && score.preliminaryScore >= 55
+        organization.approximateAnnualDonation >= 250 && score.confidenceScore < 70 && score.preliminaryStewardshipScore >= 55
       const possibleLegacyMissingFields =
-        (score.verifiedDonationWorthinessScore ?? score.preliminaryScore) >= 75 && score.confidenceScore < 85 && score.missingFields.length > 0
-      const lowScoreMeaningfulMoney = (score.verifiedDonationWorthinessScore ?? score.preliminaryScore) < 55 && organization.approximateAnnualDonation >= 150
+        resolveVerifiedStewardshipScore(score) >= 75 && score.confidenceScore < 85 && score.missingFields.length > 0
+      const lowScoreMeaningfulMoney = resolveVerifiedStewardshipScore(score) < 55 && organization.approximateAnnualDonation >= 150
       const priorityCauseMissingAccountability =
         (score.missionBucket === "Farm Animal Welfare" ||
           score.missionBucket === "Animal Rescue / Shelters" ||
           score.missionBucket === "Wildlife / Conservation") &&
-        (score.missingFields.includes("ein") || score.missingFields.includes("is501c3Verified") || score.accountabilityScore < 15 || score.financialEfficiencyStatus === "unknown")
-      const politicalUncertainty = score.politicalRiskScore < 3 || score.politicalInvolvementNotes.toLowerCase().includes("unclear")
+        (score.missingFields.includes("ein") || score.missingFields.includes("is501c3Verified") || score.accountabilityScore < 60 || score.financialEfficiencyStatus === "unknown")
+      const politicalUncertainty = score.politicalRiskScore < 60 || score.politicalInvolvementNotes.toLowerCase().includes("unclear")
       const unclearLegalIdentity = score.missingFields.includes("ein") || score.missingFields.includes("is501c3Verified")
       const missingFinancialRatios = score.financialEfficiencyStatus === "unknown"
 
@@ -113,7 +133,7 @@ export function rankingRouter(): Router {
       .filter((organization) => {
         if (!organization.scoreBreakdown) return false
         const score = organization.scoreBreakdown
-        const isWellResearchedHighConfidence = score.confidenceScore >= 85 && score.rankingStatus === "Verified Ranking"
+        const isWellResearchedHighConfidence = score.confidenceScore >= 85 && score.rankingStatus === "Research Complete"
         if (isWellResearchedHighConfidence) return false
         return getTriagePriorityReasons(organization).length > 0
       })
@@ -122,7 +142,7 @@ export function rankingRouter(): Router {
         const score = organization.scoreBreakdown
         const highDonationLowConfidenceScore =
           organization.approximateAnnualDonation >= 250 ? Math.max(0, 85 - (score?.confidenceScore ?? 0)) : 0
-        const baselineScore = score?.verifiedDonationWorthinessScore ?? score?.preliminaryScore ?? 0
+        const baselineScore = resolveVerifiedStewardshipScore(score ?? {})
         const legacyGapScore = baselineScore >= 75 ? (score?.missingFields.length ?? 0) * 12 : 0
         const lowScoreMeaningfulMoneyScore =
           baselineScore < 55 && organization.approximateAnnualDonation >= 150 ? 35 : 0
@@ -130,11 +150,11 @@ export function rankingRouter(): Router {
           (score?.missionBucket === "Farm Animal Welfare" ||
             score?.missionBucket === "Animal Rescue / Shelters" ||
             score?.missionBucket === "Wildlife / Conservation") &&
-          ((score?.accountabilityScore ?? 100) < 15)
+          ((score?.accountabilityScore ?? 100) < 60)
             ? 25
             : 0
         const politicalUncertaintyScore =
-          (score?.politicalRiskScore ?? 100) < 3 || (score?.politicalInvolvementNotes ?? "").toLowerCase().includes("unclear")
+          (score?.politicalRiskScore ?? 100) < 60 || (score?.politicalInvolvementNotes ?? "").toLowerCase().includes("unclear")
             ? 20
             : 0
 
@@ -142,7 +162,7 @@ export function rankingRouter(): Router {
           id: organization.id,
           organizationName: organization.organizationName,
           confidenceScore: organization.scoreBreakdown?.confidenceScore ?? 0,
-          donationWorthinessScore: baselineScore,
+          stewardshipScore: baselineScore,
           approximateAnnualDonation: organization.approximateAnnualDonation,
           missingFieldsCount: organization.scoreBreakdown?.missingFields.length ?? 0,
           recommendation: organization.scoreBreakdown?.recommendation ?? "Review Before Donating",
@@ -175,6 +195,16 @@ export function rankingRouter(): Router {
     response.json({ triageQueue })
   })
 
+  router.get("/portfolio-review", async (_request, response) => {
+    const organizations = await getOrganizations()
+    response.json(buildPortfolioReview(organizations))
+  })
+
+  router.get("/portfolio-concentration", async (_request, response) => {
+    const organizations = await getOrganizations()
+    response.json(buildPortfolioConcentration(organizations))
+  })
+
   router.get("/giving-plan", async (_request, response) => {
     const organizations = await getOrganizations()
     const groups = MISSION_BUCKETS.map((missionBucket) => {
@@ -186,28 +216,23 @@ export function rankingRouter(): Router {
       const topRecommended = bucketOrganizations
         .filter(
           (organization) =>
-            ["Priority Fund", "Keep"].includes(organization.recommendation) && organization.rankingStatus === "Verified Ranking",
+            ["Priority Fund", "Keep"].includes(organization.recommendation) && organization.rankingStatus === "Research Complete",
         )
         .sort(
-          (left, right) =>
-            (right.verifiedDonationWorthinessScore ?? right.preliminaryScore) -
-            (left.verifiedDonationWorthinessScore ?? left.preliminaryScore),
+          (left, right) => resolveVerifiedStewardshipScore(right) - resolveVerifiedStewardshipScore(left),
         )
-        .slice(0, 5)
+        .slice(0, GIVING_PLAN_LIMITS.maxTopRecommendedPerBucket)
       const promisingUnverified = bucketOrganizations
         .filter(
           (organization) =>
-            ["Preliminary Only", "Partially Verified"].includes(organization.rankingStatus) &&
-            organization.preliminaryScore >= 65,
+            ["Preliminary", "Research Partial"].includes(organization.rankingStatus) &&
+            resolvePreliminaryStewardshipScore(organization) >= 65,
         )
         .slice(0, 6)
       const reduceOrPause = bucketOrganizations.filter((organization) =>
         ["Reduce", "Pause / Do Not Fund"].includes(organization.recommendation),
       )
-      const suggestedKeepCount = Math.min(
-        Math.max(2, topRecommended.length || 1),
-        Math.max(1, Math.ceil(bucketOrganizations.length * 0.35)),
-      )
+      const suggestedKeepCount = Math.min(GIVING_PLAN_LIMITS.maxTopRecommendedPerBucket, Math.max(2, topRecommended.length || 1))
 
       return {
         missionBucket,
@@ -232,10 +257,10 @@ export function rankingRouter(): Router {
     const eligibleOrganizations = organizations.filter(
       (organization) =>
         organization.legacyEligible &&
-        organization.rankingStatus === "Verified Ranking" &&
-        organization.verifiedDonationWorthinessScore !== null &&
-        organization.verifiedDonationWorthinessScore >= 80 &&
-        organization.confidenceScore >= 85,
+        organization.rankingStatus === "Research Complete" &&
+        organization.verifiedStewardshipScore !== null &&
+        organization.verifiedStewardshipScore >= LEGACY_RULES.stewardshipScoreMin &&
+        organization.confidenceScore >= LEGACY_RULES.confidenceMin,
     )
     const excludedOrganizations = organizations
       .filter((organization) => !organization.legacyEligible)
@@ -243,13 +268,13 @@ export function rankingRouter(): Router {
         id: organization.id,
         organizationName: organization.organizationName,
         missionBucket: organization.missionBucket,
-        reason: organization.legacyRationale,
+        reason: organization.legacyExclusionReason ?? organization.legacyRationale,
       }))
 
     const organizationsByArea = Object.keys(DEFAULT_LEGACY_MISSION_ALLOCATION).map((missionArea) => {
       const areaOrganizations = eligibleOrganizations
         .filter((organization) => organization.missionBucket === missionArea)
-        .sort((left, right) => right.donationWorthinessScore - left.donationWorthinessScore)
+        .sort((left, right) => right.stewardshipScore - left.stewardshipScore)
       return {
         missionArea,
         defaultAllocationPercent:
@@ -261,9 +286,9 @@ export function rankingRouter(): Router {
     response.json({
       allocationDefaults: DEFAULT_LEGACY_MISSION_ALLOCATION,
       legacyRules: [
-        "Keep legacy giving focused on high-scoring and high-confidence organizations.",
-        "Avoid legacy gifts for organizations with serious red flags or unresolved legal identity.",
-        "Use backup organizations only when a core organization no longer qualifies.",
+        `Legacy requires verified stewardship ${LEGACY_RULES.stewardshipScoreMin}+, confidence ${LEGACY_RULES.confidenceMin}%+, impact at least Basic, and accountability ${LEGACY_RULES.accountabilityMin}/100.`,
+        "Legacy Core is limited to top candidates within each mission list. Local/small orgs are capped at Legacy Backup.",
+        "Avoid legacy gifts for organizations with red flags or unresolved legal identity.",
       ],
       organizationsByArea,
       excludedOrganizations,
@@ -323,8 +348,8 @@ export function rankingRouter(): Router {
       proPublicaForm990Count: organizations.filter((organization) => hasSourceType(organization, "ProPublica/Form 990")).length,
       politicalNotesCount: organizations.filter((organization) => Boolean(organization.politicalInvolvementNotes.trim())).length,
       impactEvidenceNotesCount: organizations.filter((organization) => Boolean(organization.impactEvidenceNotes.trim())).length,
-      verifiedRankingCount: organizations.filter((organization) => organization.rankingStatus === "Verified Ranking").length,
-      preliminaryOnlyCount: organizations.filter((organization) => organization.rankingStatus === "Preliminary Only").length,
+      verifiedRankingCount: organizations.filter((organization) => organization.rankingStatus === "Research Complete").length,
+      preliminaryCount: organizations.filter((organization) => organization.rankingStatus === "Preliminary").length,
     }
 
     const spreadCheck = getScoreSpreadCheck(organizations)
@@ -340,8 +365,8 @@ export function rankingRouter(): Router {
       spreadCheck,
       rankingStatusCounts,
       message: spreadCheck.warning
-        ? "Most organizations have similar scores because financial and impact data is missing. Complete research before using this as a final ranking."
-        : "Score spread looks reasonably differentiated.",
+        ? "Most organizations have similar stewardship scores because financial ratios or accountability data are still missing. Complete research before using list rank as a final comparison."
+        : "Stewardship score spread looks reasonably differentiated.",
     })
   })
 

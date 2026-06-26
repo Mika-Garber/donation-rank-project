@@ -15,8 +15,6 @@ const SEARCH_QUERY = `
     $c3: Boolean!
     $result_size: Int!
     $from: Int!
-    $beacons: [String!]!
-    $advisories: [String!]!
     $orderBy: String!
   ) {
     publicSearchFaceted(
@@ -28,8 +26,6 @@ const SEARCH_QUERY = `
       c3: $c3
       result_size: $result_size
       from: $from
-      beacons: $beacons
-      advisories: $advisories
       order_by: $orderBy
     ) {
       results {
@@ -86,8 +82,6 @@ export async function searchCharityNavigatorByTerm(term: string): Promise<Charit
         c3: true,
         result_size: 10,
         from: 0,
-        beacons: [],
-        advisories: [],
         orderBy: "RELEVANCE",
       },
     }),

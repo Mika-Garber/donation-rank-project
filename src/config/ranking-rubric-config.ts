@@ -1,9 +1,10 @@
+/** Every rubric category is scored 0–100. Weights in server ranking-config combine them into the total. */
 export const RUBRIC_CATEGORY_MAX_POINTS = {
-  governance: 10,
-  accountability: 25,
-  impactEvidence: 30,
-  financialEfficiency: 30,
-  politicalRisk: 5,
+  governance: 100,
+  accountability: 100,
+  impactEvidence: 100,
+  financialEfficiency: 100,
+  politicalRisk: 100,
 } as const
 
 export type RubricCategoryKey = keyof typeof RUBRIC_CATEGORY_MAX_POINTS

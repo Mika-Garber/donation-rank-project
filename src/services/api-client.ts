@@ -1,7 +1,10 @@
 import type {
+  AdvisorExportInput,
   DonationYearSummary,
   GivingPlanGroup,
   LegacyPlanResponse,
+  PortfolioConcentrationResponse,
+  PortfolioReviewResponse,
   Organization,
   OrganizationAddress,
   ResearchAuditResponse,
@@ -64,6 +67,21 @@ export async function updateOrganizationResearchNotes(
   return payload.organization
 }
 
+export async function updateOrganizationMissionOverlap(
+  id: string,
+  input: {
+    duplicateMission?: string
+    duplicateMissionGroup?: string
+    duplicateMissionRole?: "" | "primary" | "secondary" | "phasing-out"
+  },
+): Promise<Organization> {
+  const payload = await requestJson<{ organization: Organization }>(`/organizations/${id}/mission-overlap`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  })
+  return payload.organization
+}
+
 export async function researchImpactFrom990s(input?: {
   force?: boolean
   mergeManualNotes?: boolean
@@ -79,6 +97,22 @@ export async function researchImpactFrom990s(input?: {
   return requestJson("/organizations/research-impact-from-990s", {
     method: "POST",
     body: JSON.stringify(input ?? {}),
+  })
+}
+
+export async function runFreeResearch(): Promise<{
+  fetchedAt: string
+  message: string
+  refresh: RefreshResult
+  irsXml: {
+    financialApplied: number
+    impactApplied: number
+    impactMerged: number
+    failed: number
+  }
+}> {
+  return requestJson("/organizations/run-free-research", {
+    method: "POST",
   })
 }
 
@@ -123,15 +157,23 @@ export async function deleteDonation(
 
 export async function createOrganization(input: {
   organizationName: string
+  ein?: string
+  website?: string
   category: string
   subcategory: string
   approximateAnnualDonation: number
-  website: string
   notes: string
 }): Promise<Organization> {
   const payload = await requestJson<{ organization: Organization }>("/organizations", {
     method: "POST",
     body: JSON.stringify(input),
+  })
+  return payload.organization
+}
+
+export async function researchOrganization(id: string): Promise<Organization> {
+  const payload = await requestJson<{ organization: Organization }>(`/organizations/${id}/research`, {
+    method: "POST",
   })
   return payload.organization
 }
@@ -148,6 +190,14 @@ export async function getTriageQueue(limit = 20): Promise<TriageQueueItem[]> {
 export async function getGivingPlan(): Promise<GivingPlanGroup[]> {
   const payload = await requestJson<{ groups: GivingPlanGroup[] }>("/ranking/giving-plan")
   return payload.groups
+}
+
+export async function getPortfolioReview(): Promise<PortfolioReviewResponse> {
+  return requestJson<PortfolioReviewResponse>("/ranking/portfolio-review")
+}
+
+export async function getPortfolioConcentration(): Promise<PortfolioConcentrationResponse> {
+  return requestJson<PortfolioConcentrationResponse>("/ranking/portfolio-concentration")
 }
 
 export async function getLegacyPlan(): Promise<LegacyPlanResponse> {
@@ -167,6 +217,26 @@ export async function refreshOnlineData(): Promise<RefreshResult> {
     method: "POST",
   })
   return payload.refreshResult
+}
+
+export async function updateOrganizationAdvisorExport(
+  id: string,
+  input: AdvisorExportInput,
+): Promise<Organization> {
+  const payload = await requestJson<{ organization: Organization }>(`/organizations/${id}/advisor-export`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  })
+  return payload.organization
+}
+
+export async function updateOrganizationAdvisorExportBatch(
+  items: Array<{ organizationId: string; input: AdvisorExportInput }>,
+): Promise<{ savedCount: number }> {
+  return requestJson<{ savedCount: number }>("/organizations/advisor-export/batch", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  })
 }
 
 export async function researchAllOrganizationAddresses(): Promise<{

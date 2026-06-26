@@ -4,6 +4,7 @@ import {
   AccordionSummary,
   Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
   Divider,
@@ -11,13 +12,26 @@ import {
   Typography,
 } from "@mui/material"
 import { useMemo } from "react"
-import { useParams } from "react-router-dom"
+import { Link, useParams } from "react-router-dom"
 import { ScoreExplanationCard } from "../components/score-explanation-card/score-explanation-card"
 import { DonationLedger } from "../components/donation-ledger/donation-ledger"
 import { OrganizationAddressForm } from "../components/organization-address-form/organization-address-form"
+import { OrganizationMissionOverlapForm } from "../components/organization-mission-overlap-form/organization-mission-overlap-form"
 import { OrganizationResearchNotesForm } from "../components/organization-research-notes-form/organization-research-notes-form"
 import { useOrganizationQuery } from "../hooks/use-organization-query"
+import { useResearchOrganizationMutation } from "../hooks/use-organization-research-mutations"
 import type { Recommendation } from "../types/organization"
+import {
+  formatAdvocacyReviewLabel,
+  formatFinancialCompletenessLabel,
+  formatImpactEvidenceLevelShort,
+  formatLegalVerificationLabel,
+  formatResearchStatusLabel,
+  formatStewardshipScoreDisplay,
+  getAdvocacyReviewChipColor,
+  isStewardshipRenormalized,
+  shouldShowAdvocacyReviewChip,
+} from "../utils/ranking-display-labels"
 
 function getRecommendationColor(recommendation: Recommendation): "default" | "success" | "warning" | "error" {
   if (recommendation === "Priority Fund" || recommendation === "Keep") return "success"
@@ -29,10 +43,11 @@ function getRecommendationColor(recommendation: Recommendation): "default" | "su
 export function OrganizationDetailPage() {
   const { id = "" } = useParams()
   const { data, isLoading, isError } = useOrganizationQuery(id)
+  const researchOrganizationMutation = useResearchOrganizationMutation(id)
 
   const organization = data?.organization
   const donationSummaries = data?.donationSummaries ?? []
-  const explanation = organization?.scoreBreakdown.rankingExplanation
+  const explanation = organization?.scoreBreakdown?.rankingExplanation
   const sourceMetaEntries = useMemo(() => Object.entries(organization?.sourceMeta ?? {}), [organization])
   const researchErrors = useMemo(() => organization?.researchErrors ?? [], [organization])
 
@@ -49,14 +64,44 @@ export function OrganizationDetailPage() {
     return <Alert severity="error">Could not load this organization.</Alert>
   }
 
+  const stewardshipScore =
+    organization.objectiveStewardshipScore ?? organization.stewardshipScore
+  const renormalized = isStewardshipRenormalized(organization.financialCompletenessStatus)
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h4">{organization.organizationName}</Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-          {organization.rankingListLabel}
-          {organization.subcategory ? ` • ${organization.subcategory}` : ""}
-        </Typography>
+        <Box sx={{ alignItems: "flex-start", display: "flex", flexWrap: "wrap", gap: 2, justifyContent: "space-between" }}>
+          <Box>
+            <Typography variant="h4">{organization.organizationName}</Typography>
+            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+              {organization.rankingListLabel}
+              {organization.subcategory ? ` • ${organization.subcategory}` : ""}
+            </Typography>
+          </Box>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+            <Button
+              variant="contained"
+              onClick={() => researchOrganizationMutation.mutate()}
+              disabled={researchOrganizationMutation.isPending}
+            >
+              {researchOrganizationMutation.isPending ? "Researching..." : "Run public-source research"}
+            </Button>
+            <Button component={Link} to={`/print/organizations/${organization.id}`} variant="outlined">
+              Printable summary
+            </Button>
+          </Box>
+        </Box>
+        {researchOrganizationMutation.isSuccess && (
+          <Alert severity="success" sx={{ mt: 2 }}>
+            Public-source research completed for this organization.
+          </Alert>
+        )}
+        {researchOrganizationMutation.isError && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            Could not run public-source research for this organization.
+          </Alert>
+        )}
         {organization.website && (
           <Typography sx={{ mt: 1 }}>
             Website:{" "}
@@ -86,10 +131,26 @@ export function OrganizationDetailPage() {
 
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
+          Mission overlap tags
+        </Typography>
+        <Typography color="text.secondary" sx={{ mb: 2 }}>
+          Group organizations that do similar work so Portfolio Review can surface consolidation opportunities.
+        </Typography>
+        <OrganizationMissionOverlapForm
+          organizationId={organization.id}
+          duplicateMission={organization.duplicateMission}
+          duplicateMissionGroup={organization.duplicateMissionGroup}
+          duplicateMissionRole={organization.duplicateMissionRole}
+        />
+      </Paper>
+
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
           Research notes
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 2 }}>
-          Edit impact evidence with measurable outcomes. Saving here recalculates the score breakdown immediately.
+          Edit impact, accountability, and advocacy notes. Saving recalculates impact evidence level, review flags,
+          recommendations, and stewardship components that depend on accountability or political notes.
         </Typography>
         <OrganizationResearchNotesForm
           organizationId={organization.id}
@@ -114,11 +175,53 @@ export function OrganizationDetailPage() {
             </Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 2 }}>
               <Chip label={`Recommendation: ${organization.recommendation}`} color={getRecommendationColor(organization.recommendation)} />
-              <Chip label={`List rank: #${organization.listObjectiveRank} objective / #${organization.listPersonalizedRank} personalized`} />
-              <Chip label={`Global rank: #${organization.globalObjectiveRank} objective / #${organization.globalPersonalizedRank} personalized`} />
-              <Chip label={`Score: ${organization.objectiveDonationWorthinessScore} / 100`} />
-              <Chip label={`${new Date().getFullYear()} giving: $${organization.approximateAnnualDonation.toFixed(0)}`} />
+              <Chip
+                label={formatStewardshipScoreDisplay(stewardshipScore, organization.scoreBand, renormalized)}
+                variant="outlined"
+              />
+              <Chip label={formatResearchStatusLabel(organization.rankingStatus)} variant="outlined" />
+              <Chip label={formatLegalVerificationLabel(organization.legalVerificationStatus)} variant="outlined" />
+              <Chip label={formatImpactEvidenceLevelShort(organization.impactEvidenceLevel)} variant="outlined" />
+              <Chip
+                label={formatFinancialCompletenessLabel(organization.financialCompletenessStatus)}
+                variant="outlined"
+                color={organization.financialCompletenessStatus === "complete" ? "default" : "warning"}
+              />
+              <Chip label={`Confidence: ${organization.confidenceBand} (${organization.confidenceScore}%)`} />
+              {organization.watchdogReviewRequired && (
+                <Chip label="Watchdog review" color="warning" variant="outlined" />
+              )}
+              {shouldShowAdvocacyReviewChip(organization.advocacyReviewStatus) && (
+                <Chip
+                  label={formatAdvocacyReviewLabel(organization.advocacyReviewStatus)}
+                  color={getAdvocacyReviewChipColor(organization.advocacyReviewStatus)}
+                  variant="outlined"
+                />
+              )}
+              {organization.legacyEligible ? <Chip label={`Legacy: ${organization.legacyTier}`} color="success" /> : null}
             </Box>
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 2 }}>
+              <Chip label={`List rank: #${organization.listObjectiveRank} objective / #${organization.listPersonalizedRank} personalized`} variant="outlined" />
+              <Chip label={`Global rank: #${organization.globalObjectiveRank} objective / #${organization.globalPersonalizedRank} personalized`} variant="outlined" />
+              <Chip label={`${new Date().getFullYear()} gift: $${organization.approximateAnnualDonation.toFixed(0)}`} variant="outlined" />
+              <Chip label={`Org size: ${organization.organizationSize}`} variant="outlined" />
+            </Box>
+            {renormalized && (
+              <Typography color="text.secondary" sx={{ mb: 1.5 }}>
+                * Financial component excluded from stewardship score — remaining categories were renormalized.
+              </Typography>
+            )}
+            {organization.legacyExclusionReason && !organization.legacyEligible ? (
+              <Typography color="text.secondary" sx={{ mb: 1 }}>
+                Legacy exclusion: {organization.legacyExclusionReason}
+              </Typography>
+            ) : null}
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Gift size review (separate from stewardship score)
+            </Typography>
+            <Typography color="text.secondary" sx={{ mb: 1.5 }}>
+              {organization.donationAmountAssessment}
+            </Typography>
             <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
               {explanation.recommendationTitle}
             </Typography>
@@ -176,11 +279,11 @@ export function OrganizationDetailPage() {
 
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Score breakdown — why each part was rated this way
+              Stewardship breakdown
             </Typography>
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              Each section below explains one part of the ranking in plain language. The final score combines all of
-              these areas. Your donation amount is shown separately and only adds a small personalized boost.
+              How the stewardship score was built. Impact evidence level and review flags are shown separately and do
+              not change list rank.
             </Typography>
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {explanation.categories.map((category) => (
@@ -257,7 +360,7 @@ export function OrganizationDetailPage() {
                 Research status
               </Typography>
               <Typography>
-                Status: {organization.rankingStatus} • Confidence: {organization.confidenceScore}% • Research: {organization.researchStatus}
+                Research status: {formatResearchStatusLabel(organization.rankingStatus)} • Confidence: {organization.confidenceScore}% • Pipeline: {organization.researchStatus}
               </Typography>
               <Typography sx={{ mt: 0.5 }}>Next step: {organization.strongestNextResearchStep}</Typography>
             </Box>

@@ -2,7 +2,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Paper, Typography } from "@
 import { useQuery } from "@tanstack/react-query"
 import { useRefreshDataMutation, useRefreshStatusQuery } from "../hooks/use-refresh-data-mutation"
 import { useResearchAddressesMutation } from "../hooks/use-research-addresses-mutation"
-import { useResearchImpactFrom990sMutation } from "../hooks/use-organization-research-mutations"
+import { useResearchImpactFrom990sMutation, useRunFreeResearchMutation } from "../hooks/use-organization-research-mutations"
 import { useTriageQuery } from "../hooks/use-triage-query"
 import { getWatchdogSetup } from "../services/api-client"
 
@@ -11,6 +11,7 @@ export function DataRefreshPage() {
   const refreshDataMutation = useRefreshDataMutation()
   const researchAddressesMutation = useResearchAddressesMutation()
   const researchImpactMutation = useResearchImpactFrom990sMutation()
+  const runFreeResearchMutation = useRunFreeResearchMutation()
   const triageQuery = useTriageQuery(10)
   const watchdogSetupQuery = useQuery({
     queryKey: ["watchdog-setup"],
@@ -32,9 +33,41 @@ export function DataRefreshPage() {
         </Typography>
       </Paper>
       <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Run all free research (recommended)
+        </Typography>
+        <Typography color="text.secondary" sx={{ mb: 2 }}>
+          Refreshes ProPublica, Charity Navigator, CharityWatch catalog, and ACE catalog, pulls missing financial
+          ratios and impact notes from IRS e-file XML, and scrapes each org website for impact / annual-report pages.
+          Re-ranks automatically when done. Newly added charities are included.
+        </Typography>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Free research can verify IRS/990/watchdog/website data when available. Annual reports or impact PDFs may still need to be added manually if the app cannot find them online.
+        </Alert>
+        <Button
+          variant="contained"
+          size="large"
+          onClick={() => runFreeResearchMutation.mutate()}
+          disabled={runFreeResearchMutation.isPending}
+        >
+          {runFreeResearchMutation.isPending ? "Running free research..." : "Run all free research"}
+        </Button>
+        {runFreeResearchMutation.isSuccess && (
+          <Alert severity="success" sx={{ mt: 2 }}>
+            {runFreeResearchMutation.data.message}
+          </Alert>
+        )}
+        {runFreeResearchMutation.isError && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            Free research failed. Verify the API server is running and python3 is available.
+          </Alert>
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 3 }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Button variant="contained" size="large" onClick={handleRefresh} disabled={refreshDataMutation.isPending}>
-            {refreshDataMutation.isPending ? "Researching..." : "Research all organizations"}
+          <Button variant="outlined" size="large" onClick={handleRefresh} disabled={refreshDataMutation.isPending}>
+            {refreshDataMutation.isPending ? "Researching..." : "Research all organizations only"}
           </Button>
 
           {refreshDataMutation.isPending && (
@@ -187,7 +220,7 @@ export function DataRefreshPage() {
         <Typography>2) Review only the triage queue below</Typography>
         <Typography>3) Resolve top 5 next actions</Typography>
         <Typography sx={{ mt: 1.5 }}>
-          Monthly: manually verify top worthiness organizations and any larger gifts with low confidence.
+          Monthly: manually verify top stewardship organizations and any larger gifts with low confidence.
         </Typography>
       </Paper>
 
@@ -208,7 +241,7 @@ export function DataRefreshPage() {
             >
               <Typography>{item.organizationName}</Typography>
               <Typography variant="body2" color="text.secondary">
-                {item.recommendation} • Worthiness {item.donationWorthinessScore} • Confidence {item.confidenceScore}%
+                {item.recommendation} • Stewardship {item.stewardshipScore} • Confidence {item.confidenceScore}%
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Next action: {item.nextAction}

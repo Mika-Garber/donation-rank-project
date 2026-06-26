@@ -22,14 +22,22 @@ const port = Number.parseInt(process.env.PORT ?? "4000", 10)
 app.use(cors())
 app.use(express.json())
 
-app.get("/api/health", (_request, response) => {
+const apiRouter = express.Router()
+
+apiRouter.get("/health", (_request, response) => {
   response.json({ status: "ok" })
 })
 
-app.use("/api", requireAccessToken)
-app.use("/api/organizations", organizationsRouter())
-app.use("/api/ranking", rankingRouter())
-app.use("/api/refresh", refreshRouter())
+apiRouter.use(requireAccessToken)
+apiRouter.use("/organizations", organizationsRouter())
+apiRouter.use("/ranking", rankingRouter())
+apiRouter.use("/refresh", refreshRouter())
+
+app.use("/api", apiRouter)
+
+if (process.env.VERCEL) {
+  app.use(apiRouter)
+}
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {

@@ -1,0 +1,5 @@
+info/
+scripts/
+temp-client/
+server/data/*.backup*
+data/~$*
