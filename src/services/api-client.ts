@@ -13,9 +13,20 @@ import type {
   TriageQueueItem,
   WatchdogSetupStatus,
 } from "../types/organization"
+import type { ClientActivityEntry, SharedDataStatus } from "../types/shared-data"
+import type { AdvisorExportRow } from "../utils/advisor-export"
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api"
 const APP_ACCESS_TOKEN = import.meta.env.VITE_APP_ACCESS_TOKEN ?? ""
+
+function getActorHeaders(): Record<string, string> {
+  const actorName = typeof window !== "undefined" ? window.sessionStorage.getItem("donation-rank-actor-name")?.trim() : ""
+  if (!actorName) return {}
+  return {
+    "x-actor-name": actorName,
+    "x-actor-type": "client",
+  }
+}
 
 async function requestJson<TResponse>(path: string, options?: RequestInit): Promise<TResponse> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -23,6 +34,7 @@ async function requestJson<TResponse>(path: string, options?: RequestInit): Prom
     headers: {
       "Content-Type": "application/json",
       ...(APP_ACCESS_TOKEN ? { "x-access-token": APP_ACCESS_TOKEN } : {}),
+      ...getActorHeaders(),
       ...(options?.headers ?? {}),
     },
   })
@@ -251,4 +263,84 @@ export async function researchAllOrganizationAddresses(): Promise<{
 export async function getRefreshStatus(): Promise<RefreshResult | null> {
   const payload = await requestJson<{ latestRefresh: RefreshResult | null }>("/refresh/status")
   return payload.latestRefresh
+}
+
+export async function getSharedDataStatus(): Promise<SharedDataStatus> {
+  return requestJson<SharedDataStatus>("/shared-data/status")
+}
+
+export async function getSharedAdvisorExportRows(): Promise<AdvisorExportRow[]> {
+  const payload = await requestJson<{ rows: AdvisorExportRow[] }>("/shared-data/advisor-export")
+  return payload.rows
+}
+
+export async function replaceSharedAdvisorExportRows(
+  items: Array<{
+    organizationId: string
+    organizationName: string
+    donationAmount: number | null
+    notes: string
+    includeInExport: boolean
+    details: Record<string, string>
+  }>,
+): Promise<AdvisorExportRow[]> {
+  const payload = await requestJson<{ rows: AdvisorExportRow[] }>("/shared-data/advisor-export", {
+    method: "PUT",
+    body: JSON.stringify({ items }),
+  })
+  return payload.rows
+}
+
+export async function updateSharedAdvisorExportRow(
+  organizationId: string,
+  input: {
+    organizationName: string
+    donationAmount: number | null
+    notes: string
+    includeInExport: boolean
+    details: Record<string, string>
+  },
+): Promise<AdvisorExportRow> {
+  const payload = await requestJson<{ row: AdvisorExportRow }>(`/shared-data/advisor-export/${organizationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId,
+      ...input,
+    }),
+  })
+  return payload.row
+}
+
+export async function removeSharedAdvisorExportRow(organizationId: string): Promise<void> {
+  await requestJson(`/shared-data/advisor-export/${organizationId}`, {
+    method: "DELETE",
+  })
+}
+
+export async function logAdvisorExportGenerated(summary: {
+  selectedCount: number
+  totalDonationAmount: number
+  rowCount: number
+}): Promise<void> {
+  await requestJson("/shared-data/advisor-export/generated", {
+    method: "POST",
+    body: JSON.stringify(summary),
+  })
+}
+
+export async function getClientActivity(limit = 100): Promise<ClientActivityEntry[]> {
+  const payload = await requestJson<{ entries: Array<Record<string, unknown>> }>(
+    `/shared-data/client-activity?limit=${limit}`,
+  )
+  return payload.entries.map((entry) => ({
+    id: String(entry.id),
+    actorType: String(entry.actor_type ?? "client"),
+    actorName: String(entry.actor_name ?? "client"),
+    actionType: entry.action_type as ClientActivityEntry["actionType"],
+    organizationId: entry.organization_id ? String(entry.organization_id) : null,
+    organizationName: entry.organization_name ? String(entry.organization_name) : null,
+    oldValue: (entry.old_value_json as Record<string, unknown> | null) ?? null,
+    newValue: (entry.new_value_json as Record<string, unknown> | null) ?? null,
+    createdAt: String(entry.created_at),
+  }))
 }

@@ -4,11 +4,14 @@ import { researchAllOrganizationAddresses } from "../services/address-research-s
 import { addOrganization, getOrganizationById, getOrganizations } from "../services/data-store-service.js"
 import {
   addDonation,
+  attachSharedDonationsToOrganizations,
   deleteDonation,
   getOrganizationDonationSummaries,
   updateDonation,
   updateOrganizationAddress,
 } from "../services/donation-service.js"
+import { getActorFromRequest } from "../services/shared-data-actor.js"
+import { attachSharedDonationsToOrganization } from "../services/supabase-shared-data-service.js"
 import { runAllFreeResearch } from "../services/free-research-service.js"
 import { researchFromIrsXml } from "../services/irs-xml-research-service.js"
 import { researchImpactFromForm990s } from "../services/impact-research-service.js"
@@ -79,7 +82,7 @@ export function organizationsRouter(): Router {
   const router = Router()
 
   router.get("/", async (_request, response) => {
-    const organizations = await getOrganizations()
+    const organizations = await attachSharedDonationsToOrganizations(await getOrganizations())
     response.json({ organizations })
   })
 
@@ -121,12 +124,13 @@ export function organizationsRouter(): Router {
   })
 
   router.get("/:id", async (request, response) => {
-    const organization = await getOrganizationById(request.params.id)
-    if (!organization) {
+    const baseOrganization = await getOrganizationById(request.params.id)
+    if (!baseOrganization) {
       response.status(404).json({ message: "Organization not found." })
       return
     }
 
+    const organization = await attachSharedDonationsToOrganization(baseOrganization)
     const donationSummaries = await getOrganizationDonationSummaries(request.params.id)
     response.json({ organization, donationSummaries })
   })
@@ -179,7 +183,8 @@ export function organizationsRouter(): Router {
 
   router.post("/:id/donations", async (request, response) => {
     const payload = donationSchema.parse(request.body)
-    const organization = await addDonation(request.params.id, payload)
+    const actor = getActorFromRequest(request)
+    const organization = await addDonation(request.params.id, payload, actor)
     if (!organization) {
       response.status(404).json({ message: "Organization not found." })
       return
@@ -190,7 +195,8 @@ export function organizationsRouter(): Router {
 
   router.patch("/:id/donations/:donationId", async (request, response) => {
     const payload = donationSchema.partial().parse(request.body)
-    const organization = await updateDonation(request.params.id, request.params.donationId, payload)
+    const actor = getActorFromRequest(request)
+    const organization = await updateDonation(request.params.id, request.params.donationId, payload, actor)
     if (!organization) {
       response.status(404).json({ message: "Organization not found." })
       return
@@ -200,7 +206,8 @@ export function organizationsRouter(): Router {
   })
 
   router.delete("/:id/donations/:donationId", async (request, response) => {
-    const organization = await deleteDonation(request.params.id, request.params.donationId)
+    const actor = getActorFromRequest(request)
+    const organization = await deleteDonation(request.params.id, request.params.donationId, actor)
     if (!organization) {
       response.status(404).json({ message: "Organization not found." })
       return

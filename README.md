@@ -15,7 +15,7 @@ This app ranks organizations, explains each rank in plain English, and supports 
 
 - Frontend: Vite + React + TypeScript + Material UI + React Router + React Query + Zustand
 - Backend: Node + Express + TypeScript
-- Storage: JSON file seeded from existing donation CSV output
+- Storage: JSON file seeded from existing donation CSV output; **client-editable donations and advisor export** use Supabase when configured
 - Public-source enrichment: ProPublica Nonprofit Explorer search API
 
 ## Local setup
@@ -46,7 +46,15 @@ For local admin tools (Add Organization, Research Audit, Data Refresh, etc.), se
 
 - `VITE_SHOW_ADMIN_TOOLS=true`
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for Vercel client mode (`VITE_SHOW_ADMIN_TOOLS=false`) and environment variable setup.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Vercel client mode (`VITE_SHOW_ADMIN_TOOLS=false`) and Supabase shared donation setup.
+
+Optional Supabase (shared client/admin donations):
+
+- `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in root `.env`
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` in `server/.env`
+- Run `supabase/schema.sql` in your Supabase SQL editor
+
+Without Supabase, local JSON + browser localStorage fallbacks still work for development.
 
 ### 3) Run the app
 

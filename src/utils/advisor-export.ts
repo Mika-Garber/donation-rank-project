@@ -24,6 +24,8 @@ export interface AdvisorExportRow {
   organizationId: string
   included: boolean
   donationAmount: number
+  ledgerDonationTotal: number
+  hasManualAmountOverride: boolean
   organizationName: string
   checkPayeeName: string
   addressLine1: string
@@ -54,16 +56,23 @@ export interface AdvisorExportInputPayload {
   advisorExportNotes: string
 }
 
+export function getOrganizationDonationTotal(organization: Organization): number {
+  return organization.approximateAnnualDonation ?? 0
+}
+
 export function buildAdvisorExportRowFromOrganization(
   organization: Organization,
   included: boolean,
 ): AdvisorExportRow {
   const address = getOrganizationAddress(organization)
+  const ledgerDonationTotal = getOrganizationDonationTotal(organization)
 
   return {
     organizationId: organization.id,
     included,
-    donationAmount: organization.approximateAnnualDonation ?? 0,
+    donationAmount: ledgerDonationTotal,
+    ledgerDonationTotal,
+    hasManualAmountOverride: false,
     organizationName: asTrimmedString(organization.organizationName),
     checkPayeeName:
       asTrimmedString(organization.checkPayeeName) || asTrimmedString(organization.organizationName),
@@ -203,19 +212,85 @@ export function mergePersistedRowsWithOrganizations(
     .filter((row) => organizationById.has(row.organizationId))
     .map((row) => {
       const organization = organizationById.get(row.organizationId)!
-      const defaults = buildAdvisorExportRowFromOrganization(organization, true)
+      const defaults = buildAdvisorExportRowFromOrganization(organization, row.included)
+      const ledgerDonationTotal = getOrganizationDonationTotal(organization)
+      const hasManualAmountOverride = row.hasManualAmountOverride ?? false
+      const donationAmount = hasManualAmountOverride ? row.donationAmount : ledgerDonationTotal
+
       return {
         ...defaults,
-        donationAmount: row.donationAmount,
-        checkPayeeName: row.checkPayeeName,
-        addressLine1: row.addressLine1,
-        addressLine2: row.addressLine2,
-        city: row.city,
-        state: row.state,
-        zip: row.zip,
-        country: row.country,
-        notes: row.notes,
+        included: row.included,
+        donationAmount,
+        ledgerDonationTotal,
+        hasManualAmountOverride,
+        checkPayeeName: row.checkPayeeName || defaults.checkPayeeName,
+        addressLine1: row.addressLine1 || defaults.addressLine1,
+        addressLine2: row.addressLine2 || defaults.addressLine2,
+        city: row.city || defaults.city,
+        state: row.state || defaults.state,
+        zip: row.zip || defaults.zip,
+        country: row.country || defaults.country,
+        notes: row.notes || defaults.notes,
       }
     })
     .sort((left, right) => left.organizationName.localeCompare(right.organizationName))
+}
+
+export function syncAdvisorExportRowsWithDonationTotals(
+  rows: AdvisorExportRow[],
+  organizations: Organization[],
+): AdvisorExportRow[] {
+  return mergePersistedRowsWithOrganizations(rows, organizations)
+}
+
+export function refreshAdvisorExportAmountsFromDonations(
+  rows: AdvisorExportRow[],
+  organizations: Organization[],
+  options: { onlyNonOverridden: boolean },
+): AdvisorExportRow[] {
+  const organizationById = new Map(organizations.map((organization) => [organization.id, organization]))
+
+  return rows.map((row) => {
+    const organization = organizationById.get(row.organizationId)
+    if (!organization) return row
+
+    const ledgerDonationTotal = getOrganizationDonationTotal(organization)
+    if (options.onlyNonOverridden && row.hasManualAmountOverride) {
+      return { ...row, ledgerDonationTotal }
+    }
+
+    return {
+      ...row,
+      ledgerDonationTotal,
+      donationAmount: ledgerDonationTotal,
+      hasManualAmountOverride: false,
+    }
+  })
+}
+
+export function advisorExportRowToSharedItemInput(row: AdvisorExportRow): {
+  organizationId: string
+  organizationName: string
+  donationAmount: number | null
+  notes: string
+  includeInExport: boolean
+  details: Record<string, string>
+} {
+  return {
+    organizationId: row.organizationId,
+    organizationName: row.organizationName,
+    donationAmount: row.donationAmount > 0 ? row.donationAmount : null,
+    notes: row.notes,
+    includeInExport: row.included,
+    details: {
+      checkPayeeName: row.checkPayeeName,
+      addressLine1: row.addressLine1,
+      addressLine2: row.addressLine2,
+      city: row.city,
+      state: row.state,
+      zip: row.zip,
+      country: row.country,
+      hasManualAmountOverride: row.hasManualAmountOverride ? "true" : "false",
+    },
+  }
 }

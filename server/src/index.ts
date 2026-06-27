@@ -8,6 +8,7 @@ import { ZodError } from "zod"
 import { organizationsRouter } from "./routes/organizations.js"
 import { rankingRouter } from "./routes/ranking.js"
 import { refreshRouter } from "./routes/refresh.js"
+import { sharedDataRouter } from "./routes/shared-data.js"
 import { requireAccessToken } from "./services/auth-middleware.js"
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -21,6 +22,13 @@ const port = Number.parseInt(process.env.PORT ?? "4000", 10)
 
 app.use(cors())
 app.use(express.json())
+
+const sharedDataApi = express.Router()
+sharedDataApi.use(requireAccessToken)
+sharedDataApi.use(sharedDataRouter())
+
+app.use("/api/shared-data", sharedDataApi)
+app.use("/shared-data", sharedDataApi)
 
 const apiRouter = express.Router()
 

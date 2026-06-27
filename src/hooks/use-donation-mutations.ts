@@ -4,11 +4,20 @@ import {
   deleteDonation,
   updateDonation,
   updateOrganizationAddress,
+  updateSharedAdvisorExportRow,
 } from "../services/api-client"
 import { useAdvisorExportStore } from "../store/use-advisor-export-store"
 import type { DonationYearSummary, Organization, OrganizationAddress } from "../types/organization"
+import {
+  advisorExportRowToSharedItemInput,
+  syncAdvisorExportRowsWithDonationTotals,
+  type AdvisorExportRow,
+} from "../utils/advisor-export"
+import { advisorExportSharedQueryKey } from "./use-advisor-export-shared-query"
+import { clientActivityQueryKey } from "./use-client-activity-query"
 import { organizationQueryKey } from "./use-organization-query"
 import { organizationsQueryKey } from "./use-organizations-query"
+import { sharedDataStatusQueryKey } from "./use-shared-data-status-query"
 
 export interface OrganizationDetailQueryData {
   organization: Organization
@@ -30,13 +39,31 @@ function updateDonationCaches(
   })
 }
 
-function syncAdvisorExportDonationAmount(organizationId: string, approximateAnnualDonation: number) {
-  useAdvisorExportStore.getState().setRows((rows) => {
-    if (!rows.some((row) => row.organizationId === organizationId)) return rows
-    return rows.map((row) =>
-      row.organizationId === organizationId ? { ...row, donationAmount: approximateAnnualDonation } : row,
-    )
+function isSharedDataEnabled(queryClient: ReturnType<typeof useQueryClient>): boolean {
+  return queryClient.getQueryData<{ sharedDataEnabled: boolean }>(sharedDataStatusQueryKey)?.sharedDataEnabled ?? false
+}
+
+function syncAdvisorExportAfterDonationChange(
+  queryClient: ReturnType<typeof useQueryClient>,
+  organizationId: string,
+  organizations: Organization[],
+): void {
+  const applySync = (rows: AdvisorExportRow[]) => syncAdvisorExportRowsWithDonationTotals(rows, organizations)
+
+  useAdvisorExportStore.getState().setRows((rows) => applySync(rows))
+
+  queryClient.setQueryData<AdvisorExportRow[]>(advisorExportSharedQueryKey, (current) => {
+    if (!current) return current
+    return applySync(current)
   })
+
+  if (!isSharedDataEnabled(queryClient)) return
+
+  const syncedRows = queryClient.getQueryData<AdvisorExportRow[]>(advisorExportSharedQueryKey)
+  const syncedRow = syncedRows?.find((row) => row.organizationId === organizationId)
+  if (!syncedRow || syncedRow.hasManualAmountOverride) return
+
+  void updateSharedAdvisorExportRow(organizationId, advisorExportRowToSharedItemInput(syncedRow)).catch(() => undefined)
 }
 
 function invalidateDonationRelatedQueries(
@@ -48,6 +75,8 @@ function invalidateDonationRelatedQueries(
   void queryClient.invalidateQueries({ queryKey: ["giving-plan"] })
   void queryClient.invalidateQueries({ queryKey: ["portfolio-concentration"] })
   void queryClient.invalidateQueries({ queryKey: ["portfolio-review"] })
+  void queryClient.invalidateQueries({ queryKey: clientActivityQueryKey })
+  void queryClient.invalidateQueries({ queryKey: advisorExportSharedQueryKey })
 }
 
 function handleDonationMutationSuccess(
@@ -56,7 +85,11 @@ function handleDonationMutationSuccess(
   result: OrganizationDetailQueryData,
 ) {
   updateDonationCaches(queryClient, organizationId, result)
-  syncAdvisorExportDonationAmount(organizationId, result.organization.approximateAnnualDonation)
+
+  const organizations =
+    queryClient.getQueryData<Organization[]>(organizationsQueryKey) ?? [result.organization]
+  syncAdvisorExportAfterDonationChange(queryClient, organizationId, organizations)
+
   invalidateDonationRelatedQueries(queryClient, organizationId)
 }
 

@@ -13,13 +13,16 @@
     "migrate:ranking-status-labels": "tsc -p tsconfig.json && node dist/scripts/migrate-ranking-status-labels.js migrate",
     "validate:ranking-status-labels": "tsc -p tsconfig.json && node dist/scripts/migrate-ranking-status-labels.js validate",
     "migrate:remove-political-review-flag": "tsc -p tsconfig.json && node dist/scripts/migrate-remove-political-review-flag.js migrate",
-    "validate:remove-political-review-flag": "tsc -p tsconfig.json && node dist/scripts/migrate-remove-political-review-flag.js validate"
+    "validate:remove-political-review-flag": "tsc -p tsconfig.json && node dist/scripts/migrate-remove-political-review-flag.js validate",
+    "import:json-donations-to-supabase": "tsc -p tsconfig.json && node dist/scripts/import-json-donations-to-supabase.js",
+    "import:json-donations-to-supabase:dry-run": "tsc -p tsconfig.json && node dist/scripts/import-json-donations-to-supabase.js --dry-run"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "Stewardship ranking API server",
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
     "cors": "^2.8.6",
     "csv-parse": "^6.2.1",
     "dotenv": "^17.4.2",

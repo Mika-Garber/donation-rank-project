@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto"
 import type { DonationRecord, Organization, OrganizationAddress } from "../types/organization.js"
+import { isSupabaseConfigured } from "../config/supabase-config.js"
 import { getOrganizationById, readStoredOrganizations, saveOrganizations } from "./data-store-service.js"
 import { rankOrganizations } from "./ranking-service.js"
+import type { SharedDataActor } from "./supabase-shared-data-service.js"
+import {
+  attachSharedDonationsToOrganization,
+  attachSharedDonationsToOrganizations,
+  deleteDonationEntry,
+  insertDonationEntry,
+  listDonationEntriesForOrganization,
+  mergeDonationsIntoOrganization,
+  updateDonationEntry,
+} from "./supabase-shared-data-service.js"
 
 export interface DonationInput {
   date: string
@@ -73,7 +84,35 @@ async function saveOrganizationWithDonations(organizationId: string, updater: (o
   return rankedOrganizations.find((organization) => organization.id === organizationId) ?? null
 }
 
-export async function addDonation(organizationId: string, input: DonationInput): Promise<Organization | null> {
+async function buildOrganizationWithSharedDonations(organizationId: string): Promise<Organization | null> {
+  const organization = await getOrganizationById(organizationId)
+  if (!organization) return null
+  return attachSharedDonationsToOrganization(organization)
+}
+
+export async function addDonation(
+  organizationId: string,
+  input: DonationInput,
+  actor?: SharedDataActor,
+): Promise<Organization | null> {
+  if (isSupabaseConfigured()) {
+    const organization = await getOrganizationById(organizationId)
+    if (!organization) return null
+
+    await insertDonationEntry(
+      {
+        organizationId,
+        organizationName: organization.organizationName,
+        date: input.date,
+        amount: input.amount,
+        note: input.note?.trim() ?? "",
+      },
+      actor,
+    )
+
+    return buildOrganizationWithSharedDonations(organizationId)
+  }
+
   const donation: DonationRecord = {
     id: randomUUID(),
     date: input.date,
@@ -91,7 +130,23 @@ export async function updateDonation(
   organizationId: string,
   donationId: string,
   input: Partial<DonationInput>,
+  actor?: SharedDataActor,
 ): Promise<Organization | null> {
+  if (isSupabaseConfigured()) {
+    const updated = await updateDonationEntry(
+      organizationId,
+      donationId,
+      {
+        date: input.date,
+        amount: input.amount,
+        note: input.note !== undefined ? input.note.trim() : undefined,
+      },
+      actor,
+    )
+    if (!updated) return null
+    return buildOrganizationWithSharedDonations(organizationId)
+  }
+
   return saveOrganizationWithDonations(organizationId, (organization) => ({
     ...organization,
     donations: sortDonations(
@@ -109,7 +164,17 @@ export async function updateDonation(
   }))
 }
 
-export async function deleteDonation(organizationId: string, donationId: string): Promise<Organization | null> {
+export async function deleteDonation(
+  organizationId: string,
+  donationId: string,
+  actor?: SharedDataActor,
+): Promise<Organization | null> {
+  if (isSupabaseConfigured()) {
+    const removed = await deleteDonationEntry(organizationId, donationId, actor)
+    if (!removed) return null
+    return buildOrganizationWithSharedDonations(organizationId)
+  }
+
   return saveOrganizationWithDonations(organizationId, (organization) => ({
     ...organization,
     donations: (organization.donations ?? []).filter((donation) => donation.id !== donationId),
@@ -120,8 +185,8 @@ export async function updateOrganizationAddress(
   organizationId: string,
   address: OrganizationAddress,
 ): Promise<Organization | null> {
-  return saveOrganizationWithDonations(organizationId, (organization) => ({
-    ...organization,
+  const organization = await saveOrganizationWithDonations(organizationId, (entry) => ({
+    ...entry,
     address: {
       street: address.street?.trim() ?? "",
       city: address.city?.trim() ?? "",
@@ -130,10 +195,21 @@ export async function updateOrganizationAddress(
       country: address.country?.trim() || "US",
     },
   }))
+
+  if (!organization) return null
+  if (!isSupabaseConfigured()) return organization
+  return attachSharedDonationsToOrganization(organization)
 }
 
 export async function getOrganizationDonationSummaries(organizationId: string): Promise<DonationYearSummary[] | null> {
+  if (isSupabaseConfigured()) {
+    const donations = await listDonationEntriesForOrganization(organizationId)
+    return getDonationYearSummaries(donations)
+  }
+
   const organization = await getOrganizationById(organizationId)
   if (!organization) return null
   return getDonationYearSummaries(organization.donations ?? [])
 }
+
+export { attachSharedDonationsToOrganizations, mergeDonationsIntoOrganization }

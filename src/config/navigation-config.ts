@@ -16,6 +16,7 @@ export const clientNavItems: NavItem[] = [
 
 export const adminNavItems: NavItem[] = [
   { label: "Add Organization", href: "/organizations/new" },
+  { label: "Client Activity", href: "/client-activity" },
   { label: "Research Audit", href: "/research-audit" },
   { label: "Giving Plan", href: "/giving-plan" },
   { label: "Legacy Plan", href: "/legacy-plan" },

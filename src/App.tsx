@@ -34,6 +34,9 @@ const LegacyPlanPage = lazy(() => import("./pages/legacy-plan-page").then((modul
 const ResearchAuditPage = lazy(() =>
   import("./pages/research-audit-page").then((module) => ({ default: module.ResearchAuditPage })),
 )
+const ClientActivityPage = lazy(() =>
+  import("./pages/client-activity-page").then((module) => ({ default: module.ClientActivityPage })),
+)
 
 function PageLoader() {
   return (
@@ -135,6 +138,16 @@ export default function App() {
             <AdminRouteGuard>
               <Suspense fallback={<PageLoader />}>
                 <ResearchAuditPage />
+              </Suspense>
+            </AdminRouteGuard>
+          }
+        />
+        <Route
+          path="/client-activity"
+          element={
+            <AdminRouteGuard>
+              <Suspense fallback={<PageLoader />}>
+                <ClientActivityPage />
               </Suspense>
             </AdminRouteGuard>
           }

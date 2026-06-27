@@ -30,8 +30,17 @@ The project is deployed on **Vercel** with:
 | `VITE_SHOW_ADMIN_TOOLS` | `false` | Hides admin nav for client |
 | `VITE_APP_ACCESS_TOKEN` | optional | Match `APP_ACCESS_TOKEN` on API if you add one |
 | `VITE_API_BASE_URL` | optional | Defaults to `/api` on same domain |
+| `VITE_SUPABASE_URL` | optional | Supabase project URL (for future browser auth; shared data uses API) |
+| `VITE_SUPABASE_ANON_KEY` | optional | Supabase anon key (never use service role in the browser) |
 
-Redeploy after changing `VITE_*` variables (build-time).
+On the **API service** (Vercel → donation-rank-api → Environment Variables):
+
+| Name | Purpose |
+|------|---------|
+| `SUPABASE_URL` | Same as `VITE_SUPABASE_URL` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only; enables shared donation/advisor persistence |
+
+Redeploy after changing `VITE_*` variables (build-time). Redeploy the API service after changing `SUPABASE_*`.
 
 ### Redeploy from CLI
 
@@ -73,6 +82,29 @@ The repo includes `.vercel/project.json` so linking should work automatically af
 | Vercel production | `false` | Dashboard, Final 15–20 Plan, Advisor Export, How Ranking Works |
 
 Client mode still allows donation amount/date editing and Advisor Export.
+
+## Shared donations (Supabase)
+
+Without Supabase, donation edits on Vercel are stored per server instance (ephemeral `/tmp`) or in browser localStorage for Advisor Export — client and admin will **not** see the same data.
+
+To share donation and advisor export data between client and admin:
+
+1. Create a [Supabase](https://supabase.com) project.
+2. In Supabase SQL Editor, run the full script in [`supabase/schema.sql`](./supabase/schema.sql).
+3. Copy **Project URL** and **service_role** key (Settings → API).
+4. Set on the Vercel **API** service:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+5. Optionally set on the **frontend** service (for future auth):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+6. Redeploy both services.
+
+Verify: `GET https://donation-rank-project.vercel.app/api/shared-data/status` should return `"sharedDataEnabled": true`.
+
+Admin → **Client Activity** shows recent donation/advisor changes when Supabase is configured.
+
+**Security:** The current implementation uses the service role on the server only. Before storing real private client data in production, enable Supabase Auth + Row Level Security (see comments in `supabase/schema.sql`).
 
 Admin routes (`/data-refresh`, `/organizations/new`, etc.) show a blocked message in client mode.
 

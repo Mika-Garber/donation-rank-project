@@ -20,9 +20,18 @@ import {
   TextField,
   Typography,
 } from "@mui/material"
+import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
+import {
+  useLogAdvisorExportGeneratedMutation,
+  useRemoveSharedAdvisorExportRowMutation,
+  useReplaceSharedAdvisorExportMutation,
+  useUpdateSharedAdvisorExportRowMutation,
+} from "../hooks/use-advisor-export-mutations"
+import { advisorExportSharedQueryKey, useAdvisorExportSharedQuery } from "../hooks/use-advisor-export-shared-query"
 import { useOrganizationsQuery } from "../hooks/use-organizations-query"
+import { useSharedDataStatusQuery } from "../hooks/use-shared-data-status-query"
 import { useAdvisorExportStore } from "../store/use-advisor-export-store"
 import type { Organization } from "../types/organization"
 import {
@@ -32,6 +41,7 @@ import {
   downloadAdvisorExportCsv,
   getAdvisorExportWarnings,
   mergePersistedRowsWithOrganizations,
+  refreshAdvisorExportAmountsFromDonations,
   type AdvisorExportRow,
 } from "../utils/advisor-export"
 
@@ -65,16 +75,31 @@ function StatCard({ label, value }: { label: string; value: string }) {
 export function AdvisorExportPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const pendingOrganizationIds = useRef<string[] | null>(
     (location.state as AdvisorExportLocationState | null)?.organizationIds ?? null,
   )
   const { data: organizations = [], isLoading, isError } = useOrganizationsQuery()
-  const rows = useAdvisorExportStore((state) => state.rows)
-  const setRows = useAdvisorExportStore((state) => state.setRows)
-  const clearRows = useAdvisorExportStore((state) => state.clearRows)
+  const { data: sharedStatus, isLoading: isSharedStatusLoading } = useSharedDataStatusQuery()
+  const sharedDataEnabled = sharedStatus?.sharedDataEnabled ?? false
+  const sharedQuery = useAdvisorExportSharedQuery(sharedDataEnabled)
+  const localRows = useAdvisorExportStore((state) => state.rows)
+  const setLocalRows = useAdvisorExportStore((state) => state.setRows)
+  const clearLocalRows = useAdvisorExportStore((state) => state.clearRows)
+  const replaceSharedMutation = useReplaceSharedAdvisorExportMutation()
+  const updateSharedRowMutation = useUpdateSharedAdvisorExportRowMutation()
+  const removeSharedRowMutation = useRemoveSharedAdvisorExportRowMutation()
+  const logExportGeneratedMutation = useLogAdvisorExportGeneratedMutation()
   const [excludeIncomplete, setExcludeIncomplete] = useState(false)
   const [hasHydrated, setHasHydrated] = useState(() => useAdvisorExportStore.persist.hasHydrated())
-  const hasSyncedOrganizations = useRef(false)
+  const hasHandledPendingAdds = useRef(false)
+  const saveTimersRef = useRef<Map<string, number>>(new Map())
+
+  const baseRows = sharedDataEnabled ? (sharedQuery.data ?? []) : localRows
+  const displayRows = useMemo(
+    () => mergePersistedRowsWithOrganizations(baseRows, organizations),
+    [baseRows, organizations],
+  )
 
   useEffect(() => {
     if (useAdvisorExportStore.persist.hasHydrated()) {
@@ -88,18 +113,23 @@ export function AdvisorExportPage() {
   }, [])
 
   useEffect(() => {
-    if (!hasHydrated || organizations.length === 0) return
-
-    if (!hasSyncedOrganizations.current) {
-      hasSyncedOrganizations.current = true
-      setRows((currentRows) => mergePersistedRowsWithOrganizations(currentRows, organizations))
+    return () => {
+      for (const timerId of saveTimersRef.current.values()) {
+        window.clearTimeout(timerId)
+      }
     }
+  }, [])
+
+  useEffect(() => {
+    if (sharedDataEnabled || !hasHydrated || organizations.length === 0) return
 
     if (!pendingOrganizationIds.current) return
+    if (hasHandledPendingAdds.current) return
 
+    hasHandledPendingAdds.current = true
     const organizationIds = new Set(pendingOrganizationIds.current)
     pendingOrganizationIds.current = null
-    setRows((currentRows) => {
+    setLocalRows((currentRows) => {
       const existingIds = new Set(currentRows.map((row) => row.organizationId))
       const additions = buildRowsFromOrganizations(
         organizations.filter(
@@ -109,46 +139,137 @@ export function AdvisorExportPage() {
       return mergePersistedRowsWithOrganizations([...currentRows, ...additions], organizations)
     })
     navigate(location.pathname, { replace: true, state: null })
-  }, [hasHydrated, organizations, location.pathname, navigate, setRows])
+  }, [hasHydrated, organizations, location.pathname, navigate, setLocalRows, sharedDataEnabled])
+
+  useEffect(() => {
+    if (!sharedDataEnabled || organizations.length === 0 || !pendingOrganizationIds.current) return
+    if (hasHandledPendingAdds.current) return
+
+    hasHandledPendingAdds.current = true
+    const organizationIds = new Set(pendingOrganizationIds.current)
+    pendingOrganizationIds.current = null
+    const currentRows = queryClient.getQueryData<AdvisorExportRow[]>(advisorExportSharedQueryKey) ?? []
+    const existingIds = new Set(currentRows.map((row) => row.organizationId))
+    const additions = buildRowsFromOrganizations(
+      organizations.filter((organization) => organizationIds.has(organization.id) && !existingIds.has(organization.id)),
+    )
+    const nextRows = mergePersistedRowsWithOrganizations([...currentRows, ...additions], organizations)
+    replaceSharedMutation.mutate(nextRows)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [sharedDataEnabled, organizations, queryClient, replaceSharedMutation, navigate, location.pathname])
 
   const availableToAdd = useMemo(() => {
-    const listedIds = new Set(rows.map((row) => row.organizationId))
+    const listedIds = new Set(displayRows.map((row) => row.organizationId))
     return organizations
       .filter((organization) => !listedIds.has(organization.id))
       .sort((left, right) => left.organizationName.localeCompare(right.organizationName))
-  }, [organizations, rows])
+  }, [organizations, displayRows])
 
-  const stats = useMemo(() => buildAdvisorExportStats(rows), [rows])
+  const stats = useMemo(() => buildAdvisorExportStats(displayRows), [displayRows])
+
+  function scheduleSharedRowSave(row: AdvisorExportRow): void {
+    const existingTimer = saveTimersRef.current.get(row.organizationId)
+    if (existingTimer) window.clearTimeout(existingTimer)
+
+    const timerId = window.setTimeout(() => {
+      saveTimersRef.current.delete(row.organizationId)
+      const mergedRow =
+        mergePersistedRowsWithOrganizations([row], organizations).find(
+          (entry) => entry.organizationId === row.organizationId,
+        ) ?? row
+      updateSharedRowMutation.mutate(mergedRow)
+    }, 500)
+
+    saveTimersRef.current.set(row.organizationId, timerId)
+  }
 
   function handleAddOrganization(organizationId: string): void {
     const organization = organizations.find((entry) => entry.id === organizationId)
     if (!organization) return
-    setRows((currentRows) => {
-      if (currentRows.some((row) => row.organizationId === organizationId)) return currentRows
-      return [...currentRows, buildAdvisorExportRowFromOrganization(organization, true)].sort((left, right) =>
+
+    const nextRow = buildAdvisorExportRowFromOrganization(organization, true)
+    if (sharedDataEnabled) {
+      const nextRows = [...baseRows, nextRow].sort((left, right) =>
         left.organizationName.localeCompare(right.organizationName),
       )
+      queryClient.setQueryData(advisorExportSharedQueryKey, nextRows)
+      updateSharedRowMutation.mutate(nextRow)
+      return
+    }
+
+    setLocalRows((currentRows) => {
+      if (currentRows.some((row) => row.organizationId === organizationId)) return currentRows
+      return [...currentRows, nextRow].sort((left, right) => left.organizationName.localeCompare(right.organizationName))
     })
   }
 
   function handleRemoveOrganization(organizationId: string): void {
-    setRows((currentRows) => currentRows.filter((row) => row.organizationId !== organizationId))
+    if (sharedDataEnabled) {
+      removeSharedRowMutation.mutate(organizationId)
+      return
+    }
+
+    setLocalRows((currentRows) => currentRows.filter((row) => row.organizationId !== organizationId))
   }
 
   function updateRow(organizationId: string, patch: Partial<AdvisorExportRow>): void {
-    setRows((currentRows) =>
-      currentRows.map((row) => (row.organizationId === organizationId ? { ...row, ...patch } : row)),
-    )
+    const nextBaseRows = baseRows.map((row) => (row.organizationId === organizationId ? { ...row, ...patch } : row))
+
+    if (sharedDataEnabled) {
+      queryClient.setQueryData(advisorExportSharedQueryKey, nextBaseRows)
+      const updatedRow = nextBaseRows.find((row) => row.organizationId === organizationId)
+      if (updatedRow) scheduleSharedRowSave(updatedRow)
+      return
+    }
+
+    setLocalRows(nextBaseRows)
+  }
+
+  function handleAmountChange(row: AdvisorExportRow, rawValue: string): void {
+    const donationAmount = Number.parseFloat(rawValue) || 0
+    const hasManualAmountOverride = Math.abs(donationAmount - row.ledgerDonationTotal) > 0.001
+    updateRow(row.organizationId, { donationAmount, hasManualAmountOverride })
+  }
+
+  function handleRefreshAmountsFromDonations(): void {
+    const refreshedBaseRows = refreshAdvisorExportAmountsFromDonations(baseRows, organizations, {
+      onlyNonOverridden: true,
+    })
+    const refreshedDisplayRows = mergePersistedRowsWithOrganizations(refreshedBaseRows, organizations)
+
+    if (sharedDataEnabled) {
+      replaceSharedMutation.mutate(refreshedDisplayRows)
+      return
+    }
+
+    setLocalRows(refreshedBaseRows)
+  }
+
+  function handleClearAll(): void {
+    if (sharedDataEnabled) {
+      replaceSharedMutation.mutate([])
+      return
+    }
+
+    clearLocalRows()
   }
 
   function handleDownloadCsv(): void {
-    const csv = buildAdvisorExportCsv(rows, excludeIncomplete)
+    const csv = buildAdvisorExportCsv(displayRows, excludeIncomplete)
     const dateStamp = new Date().toISOString().slice(0, 10)
     downloadAdvisorExportCsv(csv, `advisor-donation-list-${dateStamp}.csv`)
+
+    if (sharedDataEnabled) {
+      logExportGeneratedMutation.mutate({
+        selectedCount: stats.selectedCount,
+        totalDonationAmount: stats.totalDonationAmount,
+        rowCount: displayRows.length,
+      })
+    }
   }
 
   function handleOpenPrintView(): void {
-    const exportRows = rows.filter((row) => {
+    const exportRows = displayRows.filter((row) => {
       if (excludeIncomplete && getAdvisorExportWarnings(row).length > 0) return false
       return true
     })
@@ -158,9 +279,17 @@ export function AdvisorExportPage() {
         generatedAt: new Date().toISOString(),
       },
     })
+
+    if (sharedDataEnabled) {
+      logExportGeneratedMutation.mutate({
+        selectedCount: stats.selectedCount,
+        totalDonationAmount: stats.totalDonationAmount,
+        rowCount: displayRows.length,
+      })
+    }
   }
 
-  if (isLoading) {
+  if (isLoading || isSharedStatusLoading || (sharedDataEnabled && sharedQuery.isLoading)) {
     return (
       <Box sx={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 2, py: 8 }}>
         <CircularProgress />
@@ -169,12 +298,19 @@ export function AdvisorExportPage() {
     )
   }
 
-  if (isError) {
+  if (isError || (sharedDataEnabled && sharedQuery.isError)) {
     return <Alert severity="error">Could not load advisor export data.</Alert>
   }
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {!sharedDataEnabled ? (
+        <Alert severity="info">
+          Shared online donation saving requires Supabase configuration. Donations and this list are stored locally in
+          this browser until SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set on the server.
+        </Alert>
+      ) : null}
+
       <Paper sx={{ p: { md: 4, xs: 3 } }}>
         <Typography gutterBottom variant="h3">
           Advisor Export
@@ -184,20 +320,24 @@ export function AdvisorExportPage() {
           amounts, payee names, and mailing addresses. It does not include ranking or research details.
         </Typography>
         <Typography color="text.secondary" sx={{ mt: 1.5 }} variant="body2">
-          Your donation list is saved automatically. Add charities one by one, or load the suggested final list from
-          the Final 15–20 Plan page.
+          {sharedDataEnabled
+            ? "Your donation list is saved to Supabase and shared with admin. Export amounts follow your donation ledger unless you set a manual export amount."
+            : "Your donation list is saved automatically in this browser. Export amounts follow your donation ledger unless you set a manual export amount."}
         </Typography>
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5, mt: 2 }}>
           <Button component={Link} to="/portfolio-concentration" variant="outlined">
             Final 15–20 Plan
           </Button>
-          <Button disabled={rows.length === 0} onClick={handleDownloadCsv} variant="contained">
+          <Button disabled={displayRows.length === 0} onClick={handleRefreshAmountsFromDonations} variant="outlined">
+            Refresh amounts from donations
+          </Button>
+          <Button disabled={displayRows.length === 0} onClick={handleDownloadCsv} variant="contained">
             Download CSV
           </Button>
-          <Button disabled={rows.length === 0} onClick={handleOpenPrintView} variant="outlined">
+          <Button disabled={displayRows.length === 0} onClick={handleOpenPrintView} variant="outlined">
             Print / Save PDF
           </Button>
-          <Button color="error" disabled={rows.length === 0} onClick={clearRows} variant="outlined">
+          <Button color="error" disabled={displayRows.length === 0} onClick={handleClearAll} variant="outlined">
             Clear all
           </Button>
         </Box>
@@ -236,7 +376,7 @@ export function AdvisorExportPage() {
                 >
                   {availableToAdd.map((organization) => (
                     <MenuItem key={organization.id} value={organization.id}>
-                      {organization.organizationName}
+                      {organization.organizationName} ({formatCurrency(organization.approximateAnnualDonation ?? 0)})
                     </MenuItem>
                   ))}
                 </Select>
@@ -250,7 +390,7 @@ export function AdvisorExportPage() {
             />
           </Box>
         </Box>
-        {rows.length === 0 ? (
+        {displayRows.length === 0 ? (
           <Typography color="text.secondary">
             No charities in the donation list yet. Use Add charity above, or go to Final 15–20 Plan and click Load
             into donation list.
@@ -276,8 +416,11 @@ export function AdvisorExportPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {rows.map((row) => {
+                {displayRows.map((row) => {
                   const warnings = getAdvisorExportWarnings(row)
+                  const showManualLabel =
+                    row.hasManualAmountOverride && Math.abs(row.donationAmount - row.ledgerDonationTotal) > 0.001
+
                   return (
                     <TableRow key={row.organizationId} hover>
                       <TableCell
@@ -297,18 +440,22 @@ export function AdvisorExportPage() {
                           </Button>
                         </Box>
                       </TableCell>
-                      <TableCell align="right" sx={{ minWidth: 110 }}>
-                        <TextField
-                          slotProps={{ htmlInput: { min: 0, step: 1 } }}
-                          size="small"
-                          type="number"
-                          value={row.donationAmount}
-                          onChange={(event) =>
-                            updateRow(row.organizationId, {
-                              donationAmount: Number.parseFloat(event.target.value) || 0,
-                            })
-                          }
-                        />
+                      <TableCell align="right" sx={{ minWidth: 140 }}>
+                        <Box sx={{ alignItems: "flex-end", display: "flex", flexDirection: "column", gap: 0.5 }}>
+                          <TextField
+                            slotProps={{ htmlInput: { min: 0, step: 1 } }}
+                            size="small"
+                            type="number"
+                            value={row.donationAmount}
+                            onChange={(event) => handleAmountChange(row, event.target.value)}
+                          />
+                          <Typography color="text.secondary" variant="caption">
+                            Ledger: {formatCurrency(row.ledgerDonationTotal)}
+                          </Typography>
+                          {showManualLabel ? (
+                            <Chip color="info" label="Manual export amount" size="small" sx={{ height: 20 }} />
+                          ) : null}
+                        </Box>
                       </TableCell>
                       <TableCell sx={{ minWidth: 180 }}>
                         <TextField
